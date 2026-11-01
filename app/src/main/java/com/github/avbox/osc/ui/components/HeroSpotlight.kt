@@ -226,8 +226,8 @@ private fun HeroSpotlightCaption(video: Movie.Video) {
         overflow = TextOverflow.Ellipsis,
         modifier = Modifier
             .fillMaxWidth()
+            .padding(start = 24.dp, end = 24.dp)
             .marqueeOnOverflow(),
-            .padding(start = 24.dp, end = 24.dp),
     )
     val rating = ratingBadgeText(video.note)
     if (!rating.isNullOrBlank()) {
