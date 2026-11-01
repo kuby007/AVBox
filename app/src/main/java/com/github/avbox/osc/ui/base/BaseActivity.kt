@@ -1,6 +1,8 @@
 package com.github.avbox.osc.ui.base
 
 import com.github.avbox.osc.util.AppLog
+import com.github.avbox.osc.util.KV
+import com.github.avbox.osc.util.KVKeys
 import android.content.Context
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
@@ -199,6 +201,11 @@ abstract class BaseActivity : AppCompatActivity(), CustomAdapt {
 
     open fun orientationPolicyValue(): Int {
         try {
+            val follow = KV.get(
+                KVKeys.ORIENTATION_FOLLOW_SYSTEM,
+                KVKeys.ORIENTATION_FOLLOW_SYSTEM_DEFAULT
+            )
+            if (follow) return ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             val configuration = super.getResources().configuration
             return if (WindowSize.shouldLockPortrait(configuration.smallestScreenWidthDp))
                 ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT

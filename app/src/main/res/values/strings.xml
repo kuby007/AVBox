@@ -414,6 +414,15 @@
     <string name="settings_music_page_subtitle">识别为纯音频时自动打开</string>
     <string name="settings_play_auto_landscape">解析到视频后自动横屏</string>
     <string name="settings_play_auto_landscape_subtitle">关闭后保持进入播放时的方向，不再强制横屏</string>
+    <string name="settings_orientation_follow_system">跟随系统旋转</string>
+    <string name="settings_orientation_follow_system_subtitle">开启后手机横放时界面可横屏，并显示系统旋转按钮；关闭则锁定竖屏</string>
+    <string name="settings_play_pip">画中画</string>
+    <string name="settings_play_pip_subtitle">按主屏键或点播放器按钮进入小窗播放</string>
+    <string name="player_pip">画中画</string>
+    <string name="pip_back_to_app">返回播放页</string>
+    <string name="pip_action_play_pause">播放/暂停</string>
+    <string name="pip_action_previous">上一个</string>
+    <string name="pip_action_next">下一个</string>
 
     <string name="toast_config_parse_failed">配置解析失败</string>
     <string name="toast_config_fetch_failed">拉取配置失败\n%1$s</string>

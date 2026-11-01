@@ -51,6 +51,8 @@ fun PlaySettingsScreen(onNavigateBack: () -> Unit) {
     val context = LocalContext.current
     var showPrewarmWarning by remember { mutableStateOf(false) }
     var autoLandscape by remember { mutableStateOf(KV.get(KVKeys.PLAY_AUTO_LANDSCAPE, KVKeys.PLAY_AUTO_LANDSCAPE_DEFAULT)) }
+    var pipEnabled by remember { mutableStateOf(KV.get(KVKeys.PLAY_PIP_ENABLED, KVKeys.PLAY_PIP_ENABLED_DEFAULT)) }
+    var followSystem by remember { mutableStateOf(KV.get(KVKeys.ORIENTATION_FOLLOW_SYSTEM, KVKeys.ORIENTATION_FOLLOW_SYSTEM_DEFAULT)) }
     var sliderPreloadDuration by remember(config.preloadDuration) { mutableStateOf(config.preloadDuration) }
     var sliderCacheSize by remember(config.exoCacheSizeMb) { mutableStateOf(config.exoCacheSizeMb) }
 
@@ -204,7 +206,7 @@ fun PlaySettingsScreen(onNavigateBack: () -> Unit) {
                         onCheckedChange = { UiSettingsState.musicAutoOpenPage = it },
                     )
                 }
-                SettingsCard(SettingsCardPosition.LAST) {
+                SettingsCard(SettingsCardPosition.MIDDLE) {
                     SettingsSwitchRow(
                         title = stringResource(R.string.settings_play_auto_landscape),
                         leadingIconRes = R.drawable.ic_player_rotate,
@@ -213,6 +215,30 @@ fun PlaySettingsScreen(onNavigateBack: () -> Unit) {
                         onCheckedChange = {
                             KV.put(KVKeys.PLAY_AUTO_LANDSCAPE, it)
                             autoLandscape = it
+                        },
+                    )
+                }
+                SettingsCard(SettingsCardPosition.MIDDLE) {
+                    SettingsSwitchRow(
+                        title = stringResource(R.string.settings_play_pip),
+                        leadingIconRes = R.drawable.ic_player_pip,
+                        subtitle = stringResource(R.string.settings_play_pip_subtitle),
+                        checked = pipEnabled,
+                        onCheckedChange = {
+                            KV.put(KVKeys.PLAY_PIP_ENABLED, it)
+                            pipEnabled = it
+                        },
+                    )
+                }
+                SettingsCard(SettingsCardPosition.LAST) {
+                    SettingsSwitchRow(
+                        title = stringResource(R.string.settings_orientation_follow_system),
+                        leadingIconRes = R.drawable.ic_player_rotate,
+                        subtitle = stringResource(R.string.settings_orientation_follow_system_subtitle),
+                        checked = followSystem,
+                        onCheckedChange = {
+                            KV.put(KVKeys.ORIENTATION_FOLLOW_SYSTEM, it)
+                            followSystem = it
                         },
                     )
                 }

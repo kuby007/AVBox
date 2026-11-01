@@ -615,6 +615,7 @@ interface PlayerActions {
     fun onDanmuSearchClicked()
     fun onDanmuSearchLongClicked()
     fun onRotateClicked()
+    fun onPipClicked()
     fun onParamsClicked()
     fun onInfoOsdClicked()
     fun onBackClicked()

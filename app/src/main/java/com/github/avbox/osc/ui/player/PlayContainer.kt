@@ -1,5 +1,6 @@
 package com.github.avbox.osc.ui.player
 
+import com.github.avbox.osc.player.state.LockVisibility
 import android.app.Activity
 import android.content.Context
 import android.net.Uri
@@ -432,6 +433,12 @@ class PlayContainer(activity: Activity) : FrameLayout(activity), CustomAdapt, Pl
     fun hideTip() = overlays.hideTip()
 
     fun hideTipOnUiThread() = overlays.hideTipOnUiThread()
+
+    fun hideControllerUiForPip() {
+        val state = playerController.getUiState()
+        state.clearOverlays()
+        state.lockState = LockVisibility.GONE
+    }
 
     fun showPreloadReady() = overlays.showPreloadReady()
 

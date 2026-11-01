@@ -2,6 +2,8 @@
 
 package com.github.avbox.osc.ui
 
+import com.github.avbox.osc.player.pip.PipLauncher
+import com.github.avbox.osc.receiver.PipActionReceiver
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.os.Handler
@@ -48,7 +50,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
-class LivePlayActivity : BaseActivity() {
+class LivePlayActivity : BaseActivity(), PipActionReceiver.PipLiveSwitch {
 
     companion object {
         private const val TAG = "LivePlayActivity"
@@ -243,6 +245,39 @@ class LivePlayActivity : BaseActivity() {
         if (view.videoController !== controller) {
             view.setVideoController(controller)
             AppLog.i("echo-p4 re-bind live controller")
+        }
+    }
+
+    private fun hideControllerUiForPip() {
+        vm.setOverlayVisible(false)
+        vm.setFullscreen(true)
+    }
+
+    override fun pipSwitchChannel(direction: Int) {
+        val pos = nextChannel(direction)
+        selectChannelGroup(pos[0], pos[1])
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        val portrait = resources.configuration.orientation ==
+            android.content.res.Configuration.ORIENTATION_PORTRAIT
+        PipLauncher.enter(
+            this,
+            LivePlayActivity::class.java,
+            kernelView,
+            portrait,
+            true,
+        )
+    }
+
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: android.content.res.Configuration,
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        if (isInPictureInPictureMode) {
+            hideControllerUiForPip()
         }
     }
 

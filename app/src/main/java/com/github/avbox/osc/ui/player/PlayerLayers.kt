@@ -34,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -41,6 +42,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.github.avbox.osc.R
+import com.github.avbox.osc.player.pip.PipLauncher
 import com.github.avbox.osc.player.state.LockVisibility
 import com.github.avbox.osc.player.state.PlayerActions
 import com.github.avbox.osc.player.state.PlayerUiState
@@ -207,6 +209,10 @@ fun PlayerSideButtons(state: PlayerUiState, actions: PlayerActions, iconBox: Dp)
     val shown = state.lockState == LockVisibility.SHOWN
     val edge = playerEdgePadding()
     val iconSize = iconBox * ICON_TO_BOX_RATIO
+    val context = LocalContext.current
+    val pipAvailable = remember(context) {
+        PipLauncher.enabled() && PipLauncher.isSupported(context)
+    }
     Box(Modifier.fillMaxSize()) {
         SideButton(
             iconRes = R.drawable.ic_player_rotate,
@@ -219,6 +225,18 @@ fun PlayerSideButtons(state: PlayerUiState, actions: PlayerActions, iconBox: Dp)
             visible = shown && !state.locked,
             onClick = actions::onRotateClicked,
         )
+        if (pipAvailable) {
+            SideButton(
+                iconRes = R.drawable.ic_player_pip,
+                contentDescription = stringResource(R.string.player_pip),
+                startSide = true,
+                edge = edge,
+                iconSize = iconSize,
+                visible = shown && !state.locked,
+                onClick = actions::onPipClicked,
+                offsetY = iconBox * 1.2f,
+            )
+        }
         SideButton(
             iconRes = if (state.locked) R.drawable.icon_lock else R.drawable.icon_unlock,
             contentDescription = stringResource(R.string.player_lock),
@@ -240,6 +258,7 @@ private fun BoxScope.SideButton(
     iconSize: Dp,
     visible: Boolean,
     onClick: () -> Unit,
+    offsetY: Dp = 0.dp,
 ) {
     val sideAlpha = playerSideAlpha(visible)
     val sideScale = playerSideScale(visible)
@@ -247,6 +266,7 @@ private fun BoxScope.SideButton(
         modifier = Modifier
             .align(if (startSide) Alignment.CenterStart else Alignment.CenterEnd)
             .padding(start = if (startSide) edge else 0.dp, end = if (startSide) 0.dp else edge)
+            .offset(y = offsetY)
             .size(iconSize)
             .playerSideEffect(alpha = sideAlpha, scale = sideScale),
         contentAlignment = Alignment.Center,

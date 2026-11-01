@@ -1,5 +1,6 @@
 package com.github.avbox.osc.ui
 
+import com.github.avbox.osc.player.pip.PipLauncher
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
@@ -139,6 +140,30 @@ class DetailActivity : BaseActivity(), PageHost {
                     DetailScreen(activity = this, vm = vm)
                 }
             }
+        }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        val portrait = resources.configuration.orientation ==
+            android.content.res.Configuration.ORIENTATION_PORTRAIT
+        PipLauncher.enter(
+            this,
+            DetailActivity::class.java,
+            playContainer?.kernelView,
+            portrait,
+            false,
+        )
+    }
+
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: android.content.res.Configuration,
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        playContainer?.uiState()?.clearOverlays()
+        if (isInPictureInPictureMode) {
+            playContainer?.hideControllerUiForPip()
         }
     }
 

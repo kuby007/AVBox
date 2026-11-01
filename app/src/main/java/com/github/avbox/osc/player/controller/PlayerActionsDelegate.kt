@@ -13,6 +13,8 @@ import com.github.avbox.osc.player.state.PlayerActions
 import com.github.avbox.osc.player.state.SelectDialogState
 import com.github.avbox.osc.player.thirdparty.PlayerCatalog
 import com.github.avbox.osc.ui.DetailActivity
+import com.github.avbox.osc.ui.LivePlayActivity
+import com.github.avbox.osc.player.pip.PipLauncher
 import com.github.avbox.osc.util.AppLog
 import org.json.JSONException
 import java.text.SimpleDateFormat
@@ -243,6 +245,15 @@ internal class PlayerActionsDelegate(private val host: VideoPlayerController) : 
         activity?.requestedOrientation =
             if (toPortrait) ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
             else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        hideBottom()
+    }
+
+    override fun onPipClicked() {
+        val activity = host.playerActivity() ?: return
+        val live = activity is LivePlayActivity
+        val portrait = activity.resources.configuration.orientation ==
+            Configuration.ORIENTATION_PORTRAIT
+        PipLauncher.enter(activity, activity.javaClass, host.videoView, portrait, live)
         hideBottom()
     }
 
