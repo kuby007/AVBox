@@ -24,7 +24,6 @@ fun Modifier.marqueeOnOverflow(): Modifier {
         iterations = Int.MAX_VALUE,
         animationMode = MarqueeAnimationMode.Immediately,
         initialDelayMillis = TextScrollState.DELAY_MILLIS,
-        delayMillis = TextScrollState.DELAY_MILLIS,
         spacing = MarqueeSpacing.fractionOfContainer(1f / 3f),
         velocity = TextScrollState.VELOCITY_DP.dp,
     )
