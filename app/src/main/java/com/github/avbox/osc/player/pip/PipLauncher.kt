@@ -59,6 +59,33 @@ object PipLauncher {
         }
     }
 
+    /**
+     * 向系统登记画中画参数。
+     *
+     * Android 12+ 的自动进入小窗（用户上滑回主屏时自动进）只有走
+     * setPictureInPictureParams() 才会被系统登记；只把它传进
+     * enterPictureInPictureMode() 是不会被记为自动进入策略的。
+     */
+    @JvmStatic
+    fun registerAutoEnter(
+        activity: Activity,
+        targetClass: Class<out Activity>,
+        videoView: View?,
+        portraitVideo: Boolean,
+        liveMode: Boolean,
+    ) {
+        if (!enabled()) return
+        if (!isSupported(activity)) return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        try {
+            activity.setPictureInPictureParams(
+                buildParams(activity, targetClass, videoView, portraitVideo, liveMode)
+            )
+        } catch (th: Throwable) {
+            // 登记失败不影响正常播放，静默返回
+        }
+    }
+
     @RequiresApi(Build.VERSION_CODES.O)
     private fun buildParams(
         activity: Activity,

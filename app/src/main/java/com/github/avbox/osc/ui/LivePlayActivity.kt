@@ -212,6 +212,8 @@ class LivePlayActivity : BaseActivity(), PipActionReceiver.PipLiveSwitch {
         } else {
             kernelView?.resume()
         }
+        // 回到前台重新登记小窗参数，供 Android 12+ 自动进入使用
+        registerPipParams()
     }
 
     override fun onPause() {
@@ -253,6 +255,23 @@ class LivePlayActivity : BaseActivity(), PipActionReceiver.PipLiveSwitch {
         vm.setFullscreen(true)
     }
 
+    private fun registerPipParams() {
+        PipLauncher.registerAutoEnter(
+            this,
+            LivePlayActivity::class.java,
+            kernelView,
+            isPortraitVideoForPip(),
+            true,
+        )
+    }
+
+    private fun isPortraitVideoForPip(): Boolean {
+        val view = kernelView
+        if (view != null && view.hasVideoSizeForPip()) return view.isPortraitVideo()
+        return resources.configuration.orientation ==
+            android.content.res.Configuration.ORIENTATION_PORTRAIT
+    }
+
     override fun pipSwitchChannel(direction: Int) {
         val pos = nextChannel(direction)
         selectChannelGroup(pos[0], pos[1])
@@ -260,13 +279,12 @@ class LivePlayActivity : BaseActivity(), PipActionReceiver.PipLiveSwitch {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        val portrait = resources.configuration.orientation ==
-            android.content.res.Configuration.ORIENTATION_PORTRAIT
+        // 直播源多数是横比例，仍按视频本身比例决定，取不到才退回屏幕方向
         PipLauncher.enter(
             this,
             LivePlayActivity::class.java,
             kernelView,
-            portrait,
+            isPortraitVideoForPip(),
             true,
         )
     }

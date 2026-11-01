@@ -8,6 +8,7 @@ import com.github.avbox.osc.R
 import com.github.avbox.osc.api.ApiConfig
 import com.github.avbox.osc.bean.ParseBean
 import com.github.avbox.osc.player.ExoPlayer
+import com.github.avbox.osc.player.PlayerKernelView
 import com.github.avbox.osc.player.state.LockVisibility
 import com.github.avbox.osc.player.state.PlayerActions
 import com.github.avbox.osc.player.state.SelectDialogState
@@ -251,9 +252,15 @@ internal class PlayerActionsDelegate(private val host: VideoPlayerController) : 
     override fun onPipClicked() {
         val activity = host.playerActivity() ?: return
         val live = activity is LivePlayActivity
-        val portrait = activity.resources.configuration.orientation ==
-            Configuration.ORIENTATION_PORTRAIT
-        PipLauncher.enter(activity, activity.javaClass, host.videoView, portrait, live)
+        // 小窗形状取视频自身宽高比，而不是当前横竖屏播放方向
+        val kernel = host.videoView as? PlayerKernelView
+        val portrait = if (kernel != null && kernel.hasVideoSizeForPip()) {
+            kernel.isPortraitVideo()
+        } else {
+            activity.resources.configuration.orientation ==
+                Configuration.ORIENTATION_PORTRAIT
+        }
+        PipLauncher.enter(activity, activity.javaClass, kernel, portrait, live)
         hideBottom()
     }
 

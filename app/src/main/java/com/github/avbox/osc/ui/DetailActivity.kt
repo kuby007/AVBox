@@ -145,13 +145,12 @@ class DetailActivity : BaseActivity(), PageHost {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        val portrait = resources.configuration.orientation ==
-            android.content.res.Configuration.ORIENTATION_PORTRAIT
+        // 小窗形状按视频本身的宽高比决定，和当前是横屏还是竖屏播放无关
         PipLauncher.enter(
             this,
             DetailActivity::class.java,
             playContainer?.kernelView,
-            portrait,
+            isPortraitVideoForPip(),
             false,
         )
     }
@@ -408,6 +407,7 @@ class DetailActivity : BaseActivity(), PageHost {
         val container = playContainer ?: return
         if (container.hasVideoSize()) {
             applyVideoOrientation(container.isPortraitVideo())
+            registerPipParams()
             return
         }
         if (videoSizeWatchArmed) return
@@ -420,6 +420,25 @@ class DetailActivity : BaseActivity(), PageHost {
         videoSizeWatchArmed = false
         playContainer?.videoSizeReadyListener = null
         applyVideoOrientation(portraitVideo)
+        registerPipParams()
+    }
+
+    /** 视频宽高已知后向系统登记小窗参数，Android 12+ 才能自动进小窗 */
+    private fun registerPipParams() {
+        PipLauncher.registerAutoEnter(
+            this,
+            DetailActivity::class.java,
+            playContainer?.kernelView,
+            isPortraitVideoForPip(),
+            false,
+        )
+    }
+
+    private fun isPortraitVideoForPip(): Boolean {
+        val container = playContainer
+        if (container != null && container.hasVideoSize()) return container.isPortraitVideo()
+        return resources.configuration.orientation ==
+            android.content.res.Configuration.ORIENTATION_PORTRAIT
     }
 
     override fun orientationPolicyValue(): Int {

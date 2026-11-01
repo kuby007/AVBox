@@ -286,6 +286,9 @@ class PlayerKernelView : BasePlayerView, DrawHandler.Callback {
 
     fun isPortraitVideo(): Boolean = VideoOrientation.isPortrait(videoSizePx[0], videoSizePx[1])
 
+    /** 视频宽高是否已就绪；未就绪时 isPortraitVideo() 的结果不可信 */
+    fun hasVideoSizeForPip(): Boolean = videoSizePx[0] > 0 && videoSizePx[1] > 0
+
     fun clearVideoFrame() {
         val player = kernelPlayer
         if (player is ExoPlayer) player.stopForFrameClear() else player?.stop()
