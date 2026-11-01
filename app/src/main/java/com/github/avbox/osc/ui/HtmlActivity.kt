@@ -2,13 +2,20 @@ package com.github.avbox.osc.ui
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.graphics.Color
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.view.KeyEvent
+import android.view.View
 import android.view.ViewGroup
+import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
+import android.webkit.WebChromeClient
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import com.github.avbox.osc.util.KV
@@ -19,12 +26,21 @@ import java.io.File
 /**
  * HTML 脚本（type 6）的全屏承载页。
  *
- * 职责只有两个：跑脚本、把结果带回去。UI 由 App 自己画，
- * 分类与宫格数据是脚本 return 出来的，不是 WebView 渲染出来的。
+ * 【定位】html 是【被打开的应用】，不是【数据源】—— 与 appmenu / WvWv 的思路一致：
+ * 分类与宫格由宿主造（一张「启动脚本」卡），页面本身不回传任何数据。
+ * 用户点这张卡 → 拉起本页打开页面 → 页面常驻，用户自己操作 → 按返回关闭。
+ * 页面被误关后再点卡可再次拉起（二次启动）。
  *
- * 生命周期：HtmlSpider 每次调用都新起一次本页 → 注入 fm-api.js →
- * 调脚本对应的全局函数 → 脚本 return（或调 fm.done）→ 回传 → 本页关闭。
- * 所以进站点会看到它弹一次，之后点宫格再弹一次，符合"用完即走"。
+ * 【WebView 设置参照 appmenu 的 WebHome.Overlay】我们是宿主，不依赖子程序，
+ * 但 WebView 该怎么养是通用工程经验，主流做法缺一项都可能让页面白屏或卡死：
+ *   · 必须 setWebChromeClient —— 缺了它 alert/prompt/console 全不工作，
+ *     不少脚本卡在等一个弹窗上，表现就是「打开后卡死」。
+ *   · 必须 setMediaPlaybackRequiresUserGesture(false) —— 否则页面内音视频要手动点。
+ *   · 必须开 Cookie（含第三方）—— 登录态与同域资源取不到。
+ *   · 返回必须先问 WebView.canGoBack() —— 否则 html 的二级页按返回直接关掉整个页，
+ *     回不到一级页。
+ *   · 关闭时按 stopLoading → 卸桥 → about:blank → clearHistory → destroy 的顺序收，
+ *     直接 destroy 会让 WebView 在渲染线程上未决崩溃。
  */
 class HtmlActivity : Activity() {
 
@@ -37,6 +53,8 @@ class HtmlActivity : Activity() {
         /** 常驻模式：html 是【被打开的应用】，只加载页面、不调用脚本函数、
          *  不等回传、不自动关闭，由用户按返回关闭。 */
         val resident: Boolean = false,
+        /** 站点代理地址；非空才接管子资源，为空一律交给 WebView 原生加载。 */
+        val proxy: String = "",
         val callback: (String?) -> Unit = {},
     )
 
@@ -48,6 +66,7 @@ class HtmlActivity : Activity() {
     /** 每次调用只允许注入执行一次：onPageFinished 会因重定向/iframe 触发多次，
      *  重复执行会让脚本回调两次，Spider 侧拿到第二次的空结果。 */
     private var invoked = false
+    private var destroyed = false
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -62,32 +81,86 @@ class HtmlActivity : Activity() {
         curSiteKey = req.siteKey
         live = this
 
+        val root = android.widget.FrameLayout(this)
+        root.setBackgroundColor(Color.BLACK)
         val wv = WebView(this)
         webView = wv
-        setContentView(wv, ViewGroup.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.MATCH_PARENT,
-        ))
+        root.addView(
+            wv,
+            android.widget.FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ),
+        )
+        setContentView(root)
 
-        wv.settings.javaScriptEnabled = true
-        wv.settings.domStorageEnabled = true
-        // 在线 url 页面常是 https 壳里嵌 http 资源，默认 MIXED_CONTENT_NEVER_ALLOW
-        // 会直接拦掉，页面白屏、脚本永远不执行 —— 表现为「url 的 html 打不开」。
-        wv.settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-        wv.settings.loadWithOverviewMode = true
-        wv.settings.useWideViewPort = true
-        wv.settings.userAgentString = wv.settings.userAgentString
-        @Suppress("DEPRECATION")
-        wv.settings.allowUniversalAccessFromFileURLs = true
-        wv.addJavascriptInterface(Bridge(req), "FmBridge")
+        setupWebView(wv, req)
+        load(wv, req)
+    }
 
-        // 脚本不回调时兜底关闭，避免页面常驻挡住操作
-        // （常驻模式例外：页面本来就该常驻，等用户按返回，不能自己关）
-        if (!req.resident) {
-            mainHandler.postDelayed({ settle(null) }, AUTO_CLOSE_MS)
+    /**
+     * WebView 设置：逐项对齐主流 WebView Spider 的成熟配置。
+     * 少一项都可能是「白屏 / 卡死 / 取不到数据」的直接原因。
+     */
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun setupWebView(v: WebView, req: Request) {
+        v.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            v.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, true)
         }
 
-        wv.webViewClient = object : WebViewClient() {
+        val s = v.settings
+        s.javaScriptEnabled = true
+        s.domStorageEnabled = true
+        // 页面内音视频不要求用户先点击 —— 音乐/播放器类 html 全靠这个
+        s.mediaPlaybackRequiresUserGesture = false
+        // 在线页面常是 https 壳里嵌 http 资源，默认 NEVER_ALLOW 会直接拦掉 → 白屏
+        s.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+        s.useWideViewPort = true
+        s.loadWithOverviewMode = true
+        s.setSupportZoom(false)
+        s.builtInZoomControls = false
+        s.displayZoomControls = false
+        s.textZoom = 100
+        s.cacheMode = WebSettings.LOAD_DEFAULT
+        s.allowFileAccess = true
+        s.allowContentAccess = true
+        s.allowFileAccessFromFileURLs = true
+        @Suppress("DEPRECATION")
+        s.allowUniversalAccessFromFileURLs = true
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            s.offscreenPreRaster = true
+        }
+
+        v.setBackgroundColor(Color.BLACK)
+        v.overScrollMode = View.OVER_SCROLL_NEVER
+        v.scrollBarStyle = View.SCROLLBARS_INSIDE_OVERLAY
+        v.isFocusable = true
+        v.isFocusableInTouchMode = true
+        v.requestFocus()
+
+        try {
+            val cm = CookieManager.getInstance()
+            cm.setAcceptCookie(true)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                cm.setAcceptThirdPartyCookies(v, true)
+            }
+        } catch (ignored: Throwable) {
+        }
+
+        // 缺了这个 alert/prompt/confirm 全部静默失效，脚本卡在等交互上 → 看起来「卡死」
+        v.webChromeClient = WebChromeClient()
+        v.addJavascriptInterface(Bridge(req), "FmBridge")
+
+        v.webViewClient = object : WebViewClient() {
+
+            override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
+                val u = url ?: return true
+                // http/https/file 交给 WebView 自己加载；其余（自定义 scheme）拦下
+                return !(u.startsWith("http://") || u.startsWith("https://")
+                        || u.startsWith("file://"))
+            }
+
             override fun onPageStarted(
                 view: WebView?,
                 url: String?,
@@ -104,19 +177,25 @@ class HtmlActivity : Activity() {
             }
 
             /**
-             * 把页面里的子资源接到 App 网络栈，让站点代理对 WebView 同样生效 ——
-             * WebView 自己是不认 OkHttp 的 proxySelector 的。
-             * 取不到就返回 null，交给 WebView 自己加载，不硬拦。
+             * 子资源接管：只在【站点开了代理】时才接。
+             *
+             * WebView 不认 OkHttp 的 proxySelector，代理对它无效，所以要接管。
+             * 但接管是同步阻塞在 WebView 的 IO 线程上的——页面资源一多就把线程占满，
+             * 表现正是「打开后卡死」。没配代理的站点根本不需要接管，
+             * 一律放行给 WebView 原生，既快又不卡。
              */
             override fun shouldInterceptRequest(
                 view: WebView?,
                 request: android.webkit.WebResourceRequest?,
             ): android.webkit.WebResourceResponse? {
                 val r = request ?: return null
+                if (req.proxy.isBlank()) return null
                 if (r.method != "GET") return null
-                if (r.isForMainFrame) return null // 主文档已由我们走代理取过
                 val url = r.url?.toString() ?: return null
                 if (!url.startsWith("http://") && !url.startsWith("https://")) return null
+                // 回环地址不能接管，否则自己请求自己 → 死循环
+                val host = r.url?.host
+                if (host == "127.0.0.1" || host == "localhost") return null
                 return try {
                     val resp = com.github.catvod.net.OkHttp.client()
                         .newCall(okhttp3.Request.Builder().url(url).build())
@@ -160,49 +239,41 @@ class HtmlActivity : Activity() {
             }
         }
 
-        val html = loadLocal(req.api)
-        if (html != null) {
-            // 本地脚本：读正文塞进去，baseUrl 用脚本所在目录，脚本里的相对引用才解析得到
-            val base = localBase(req.api)
-            wv.loadDataWithBaseURL(base, html, "text/html", "UTF-8", null)
-        } else {
-            // 远程 url：先用 App 网络栈（走站点代理）把正文取回来再注入。
-            // 直接 loadUrl 的话 WebView 走自己的网络栈，代理对它完全无效。
-            fetchRemoteThenLoad(wv, req)
+        // 脚本不回调时兜底关闭，避免页面常驻挡住操作
+        // （常驻模式例外：页面本来就该常驻，等用户按返回，不能自己关）
+        if (!req.resident) {
+            mainHandler.postDelayed({ settle(null) }, AUTO_CLOSE_MS)
         }
     }
 
     /**
-     * 远程 html：走 OkHttp（挂了代理选择器）下载正文，再以原 url 为 baseUrl 注入。
-     * 这样页面正文和页面里的子资源都走同一套代理规则；
-     * 取不到正文（比如纯动态渲染的页面）才退回直接 loadUrl。
+     * 加载页面。本地文件直接 loadUrl("file://...")，远程直接 loadUrl(url)。
+     *
+     * 【为什么不再 loadDataWithBaseURL 塞正文】塞进去的页面 baseURI 会失真，
+     * 页面里的相对引用和 fetch 全被打死 —— 表现就是「只出框架、取不到数据」。
+     * 主流做法就是 loadUrl，baseURI 天然正确。
      */
-    private fun fetchRemoteThenLoad(wv: WebView, req: Request) {
+    private fun load(wv: WebView, req: Request) {
         val url = req.api
-        Thread {
-            var text: String? = null
-            var charset = "UTF-8"
-            try {
-                val resp = com.github.catvod.net.OkHttp.client()
-                    .newCall(okhttp3.Request.Builder().url(url).build())
-                    .execute()
-                charset = charsetOf(resp.header("content-type"))
-                text = resp.body?.string()
-                resp.close()
-            } catch (th: Throwable) {
-                AppLog.e(TAG, th)
-            }
-            mainHandler.post {
-                if (isFinishing || isDestroyed) return@post
-                val view = webView ?: return@post
-                if (text.isNullOrEmpty()) {
-                    AppLog.i("$TAG: remote html empty, fallback to loadUrl")
-                    view.loadUrl(url)
-                } else {
-                    view.loadDataWithBaseURL(url, text, "text/html", charset, null)
+        try {
+            when {
+                url.startsWith("http://") || url.startsWith("https://") -> wv.loadUrl(url)
+                url.startsWith("file://") -> wv.loadUrl(url)
+                url.startsWith("/") -> wv.loadUrl("file://$url")
+                url.startsWith("clan://localhost/") -> {
+                    val p = Environment.getExternalStorageDirectory().absolutePath + "/" +
+                        Uri.decode(url.substring("clan://localhost/".length))
+                    wv.loadUrl("file://$p")
+                }
+                else -> {
+                    AppLog.i("$TAG: invalid api=$url")
+                    if (!req.resident) settle(null)
                 }
             }
-        }.start()
+        } catch (th: Throwable) {
+            AppLog.e(TAG, th)
+            if (!req.resident) settle(null)
+        }
     }
 
     private fun charsetOf(contentType: String?): String {
@@ -213,14 +284,80 @@ class HtmlActivity : Activity() {
             .split(";", ",")[0].trim().trim('"').ifEmpty { "UTF-8" }
     }
 
+    /**
+     * 返回键：先看 WebView 内部有没有上一级页面。
+     * 缺这一步的话，html 的二级页按返回会直接把整个承载页关掉，
+     * 根本回不到一级页 —— 这是之前「二级页面返回不到一级」的直接原因。
+     */
+    @Suppress("MissingSuperCall")
+    override fun onBackPressed() {
+        val wv = webView
+        if (wv != null && wv.canGoBack()) {
+            wv.goBack()
+            return
+        }
+        // 不依赖 super（各版本行为不一，且可能被预测式返回吃掉），直接收掉自己，
+        // 保证「返回一定回到首页宫格」，不会停在过渡页上
+        finishSafely()
+    }
+
+    /** 兜底：部分机型/全屏场景下 onBackPressed 不触发，这里再接一次 */
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            val wv = webView
+            if (wv != null && wv.canGoBack()) {
+                wv.goBack()
+                return true
+            }
+            finishSafely()
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    /** 按主流顺序收掉 WebView，避免渲染线程上未决崩溃 */
+    private fun releaseWebView() {
+        val wv = webView ?: return
+        webView = null
+        try {
+            wv.stopLoading()
+            @Suppress("DEPRECATION")
+            wv.removeJavascriptInterface("FmBridge")
+            wv.loadUrl("about:blank")
+            wv.clearHistory()
+            wv.removeAllViews()
+            wv.destroy()
+        } catch (ignored: Throwable) {
+        }
+    }
+
+    private fun finishSafely() {
+        mainHandler.removeCallbacks(idleClose)
+        val left = currentReq
+        currentReq = null
+        try {
+            left?.callback?.invoke(null)
+        } catch (th: Throwable) {
+            AppLog.e(TAG, th)
+        }
+        try {
+            if (!isFinishing && !isDestroyed) finish()
+        } catch (ignored: Throwable) {
+        }
+    }
+
     override fun onDestroy() {
+        destroyed = true
         if (live === this) live = null
         mainHandler.removeCallbacks(idleClose)
         val left = currentReq
         currentReq = null
-        left?.callback?.invoke(null)
-        webView?.destroy()
-        webView = null
+        try {
+            left?.callback?.invoke(null)
+        } catch (th: Throwable) {
+            AppLog.e(TAG, th)
+        }
+        releaseWebView()
         super.onDestroy()
     }
 
@@ -229,6 +366,7 @@ class HtmlActivity : Activity() {
         val api = readAsset("fm-api.js") ?: return
         val view = webView ?: return
         mainHandler.post {
+            if (destroyed) return@post
             try {
                 @Suppress("DEPRECATION")
                 view.evaluateJavascript(api, null)
@@ -274,6 +412,7 @@ class HtmlActivity : Activity() {
         """.trimIndent()
         val view = webView ?: return
         mainHandler.post {
+            if (destroyed) return@post
             try {
                 @Suppress("DEPRECATION")
                 view.evaluateJavascript(script, null)
@@ -350,7 +489,7 @@ class HtmlActivity : Activity() {
             AppLog.e(TAG, th)
         }
         try {
-            finish()
+            if (!isFinishing && !isDestroyed) finish()
         } catch (ignored: Throwable) {
         }
     }
@@ -371,37 +510,6 @@ class HtmlActivity : Activity() {
             AppLog.e(TAG, th)
             null
         }
-
-    private fun loadLocal(api: String): String? {
-        val path = resolveLocalPath(api) ?: return null
-        return try {
-            val f = File(path)
-            if (f.exists()) f.readText() else null
-        } catch (th: Throwable) {
-            null
-        }
-    }
-
-    private fun localBase(api: String): String {
-        val path = resolveLocalPath(api) ?: return "file:///android_asset/"
-        val f = File(path)
-        return "file://" + (f.parent ?: "/") + "/"
-    }
-
-    /** 复用配置解析里同一套换算：clan://localhost/x 与 file://x 都落到真实路径 */
-    private fun resolveLocalPath(api: String): String? {
-        var url = api
-        val pk = url.indexOf(";pk;")
-        if (pk >= 0) url = url.substring(0, pk)
-        val q = url.indexOf('?')
-        if (q >= 0) url = url.substring(0, q)
-        if (url.startsWith("clan://localhost/")) {
-            return Environment.getExternalStorageDirectory().absolutePath + "/" +
-                Uri.decode(url.substring("clan://localhost/".length))
-        }
-        if (url.startsWith("file://")) return Uri.decode(url.substring("file://".length))
-        return if (url.startsWith("/")) url else null
-    }
 
     private inner class Bridge(private val req: Request) {
 

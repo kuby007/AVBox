@@ -47,14 +47,31 @@ class HtmlSpider(
      */
     override fun homeContent(filter: Boolean): String = launchResult()
 
-    override fun homeVideoContent(): String = launchResult()
+    /**
+     * 首页推荐位：返回空 —— 宫格只由 categoryContent 一处提供。
+     * 这里再返回一张卡的话会和分区结果叠加成两张（与 WvWv 的做法一致）。
+     */
+    override fun homeVideoContent(): String = emptyResult()
 
+    /**
+     * 分区宫格。只有第一页给启动卡，第二页起给空列表。
+     *
+     * 【为什么必须带分页字段】宿主 HomeViewModel 的判定是：
+     *   FIRST_PAGE = 1，hasMore = !(maxPage > 0 && nextPage > maxPage)，
+     *   merged = if (page == 0) videos else p.videos + videos
+     * 不返回 pagecount 时 maxPage = 0 → hasMore 恒为 true，且 page 从 1 开始
+     * 走的是累加分支 —— 于是滚到底就再追加一张启动卡，越滚越多，
+     * 表现就是「生成了无数个启动脚本的宫格」。
+     */
     override fun categoryContent(
         tid: String?,
         pg: String,
         filter: Boolean,
         extend: HashMap<String, String>?,
-    ): String = launchResult()
+    ): String {
+        val page = pg.trim().toIntOrNull() ?: 1
+        return if (page <= 1) launchResult() else emptyResult()
+    }
 
     /**
      * 点启动卡 = 拉起页面。返回空列表 → 不进详情页，停在首页。
@@ -97,6 +114,9 @@ class HtmlSpider(
                     method = "",
                     args = "{}",
                     resident = true,
+                    // 只有站点真配了代理才让承载页接管子资源；没配就交给 WebView
+                    // 原生加载，否则每个子资源都同步走一趟 OkHttp，IO 线程被占满 → 卡死
+                    proxy = siteProxy(key),
                 ) { /* 常驻页面不回传数据 */ }
                 val starter = resolveStarter() ?: return@post
                 val launch = android.content.Intent(starter, HtmlActivity::class.java)
@@ -109,6 +129,14 @@ class HtmlSpider(
             }
         }
     }
+
+    /** 站点配置的代理地址；没配返回空串。 */
+    private fun siteProxy(key: String): String =
+        try {
+            com.github.avbox.osc.api.ApiConfig.get().getSource(key)?.proxy ?: ""
+        } catch (th: Throwable) {
+            ""
+        }
 
     /** 取栈顶 Activity 作为启动上下文。拿不到才退回 Application。 */
     private fun resolveStarter(): android.content.Context? {
@@ -128,7 +156,7 @@ class HtmlSpider(
         return AppContextHolder.context()
     }
 
-    /** 分类「启动」+ 宫格一张启动卡 */
+    /** 分类「启动」+ 宫格一张启动卡，并带齐分页字段（见 categoryContent 的说明） */
     private fun launchResult(): String = JSONObject()
         .put(
             "class",
@@ -148,10 +176,21 @@ class HtmlSpider(
                     .put("vod_remarks", "HTML"),
             ),
         )
+        .put("page", 1)
+        .put("pagecount", 1)
+        .put("limit", 1)
+        .put("total", 1)
         .toString()
 
+    /** 空结果同样带分页字段，否则宿主仍会认为「还有下一页」继续追加 */
     private fun emptyResult(): String =
-        JSONObject().put("list", org.json.JSONArray()).toString()
+        JSONObject()
+            .put("list", org.json.JSONArray())
+            .put("page", 1)
+            .put("pagecount", 1)
+            .put("limit", 0)
+            .put("total", 0)
+            .toString()
 
     private companion object {
         const val TAG = "HtmlSpider"
