@@ -437,7 +437,7 @@ class PlayContainer(activity: Activity) : FrameLayout(activity), CustomAdapt, Pl
     fun hideControllerUiForPip() {
         val state = playerController.getUiState()
         state.clearOverlays()
-        state.lockState = LockVisibility.GONE
+        state.updateLockState(LockVisibility.GONE)
     }
 
     fun showPreloadReady() = overlays.showPreloadReady()
