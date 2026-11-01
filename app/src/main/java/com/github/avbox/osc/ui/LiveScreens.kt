@@ -87,6 +87,7 @@ import com.github.avbox.osc.ui.theme.cardContainer
 import java.util.ArrayList
 import java.util.Date
 import kotlin.math.max
+import com.github.avbox.osc.ui.components.marqueeOnOverflow
 
 @Composable
 internal fun LiveScreen(state: LivePlayUiState, actions: LivePlayActions) {
@@ -401,7 +402,9 @@ private fun ChannelInfoSection(
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .marqueeOnOverflow(),
             )
             if (timeshift.isBackState) {
                 Text(text = stringResource(R.string.live_replaying), fontSize = 12.sp, color = MaterialTheme.colorScheme.tertiary)
@@ -415,6 +418,7 @@ private fun ChannelInfoSection(
         }
         Spacer(modifier = Modifier.height(6.dp))
         Text(
+            modifier = Modifier.marqueeOnOverflow(),
             text = info.currentEpgTime + "  " + info.currentEpgTitle,
             fontSize = 13.sp,
             color = MaterialTheme.colorScheme.onSurface,
@@ -423,6 +427,7 @@ private fun ChannelInfoSection(
         )
         Spacer(modifier = Modifier.height(2.dp))
         Text(
+            modifier = Modifier.marqueeOnOverflow(),
             text = info.nextEpgTime + "  " + info.nextEpgTitle,
             fontSize = 13.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -557,6 +562,7 @@ private fun ChannelRow(
             modifier = Modifier.width(36.dp),
         )
         Text(
+            modifier = Modifier.marqueeOnOverflow(),
             text = channel.channelName ?: "",
             fontSize = 15.sp,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
@@ -635,7 +641,9 @@ private fun EpgSheet(
                         },
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .marqueeOnOverflow(),
                     )
                     when {
                         selected -> Text(

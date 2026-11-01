@@ -35,6 +35,7 @@ import com.github.avbox.osc.R
 import com.github.avbox.osc.api.ApiConfig
 import com.github.avbox.osc.data.FollowDays
 import com.github.avbox.osc.ui.components.FollowReminderSheet
+import com.github.avbox.osc.ui.components.marqueeOnOverflow
 
 internal val HeroScrollFadeDistance = 300.dp
 
@@ -134,6 +135,7 @@ internal fun DetailContent(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier
                                 .padding(start = 12.dp)
+                                .marqueeOnOverflow(),
                                 .widthIn(max = 180.dp),
                         )
                     }
@@ -191,6 +193,7 @@ private fun LineCard(
         modifier = Modifier.width(DetailItemWidth),
     ) {
         Text(
+            modifier = Modifier.marqueeOnOverflow(),
             text = name,
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,

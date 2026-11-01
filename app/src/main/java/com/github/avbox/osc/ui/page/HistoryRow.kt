@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import com.github.avbox.osc.ui.components.marqueeOnOverflow
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -52,6 +51,7 @@ import com.github.avbox.osc.ui.theme.cardContainer
 import com.github.avbox.osc.util.TimeAgoUnit
 import com.github.avbox.osc.util.timeAgoValueOf
 import kotlin.math.roundToInt
+import com.github.avbox.osc.ui.components.marqueeOnOverflow
 
 internal const val PROGRESS_ENTER_DURATION_MS = 600
 
@@ -133,6 +133,7 @@ internal fun HistoryRow(
                         .marqueeOnOverflow(),
                 )
                 Text(
+                    modifier = Modifier.marqueeOnOverflow(),
                     text = listOf(episodeLabel, watchedLabel.orEmpty())
                         .filter { it.isNotEmpty() }
                         .joinToString(HistoryMetaSeparator),
@@ -204,6 +205,7 @@ internal fun HistoryRow(
                     .joinToString(HistoryMetaSeparator)
                 if (metaText.isNotEmpty()) {
                     Text(
+                        modifier = Modifier.marqueeOnOverflow(),
                         text = metaText,
                         style = MaterialTheme.typography.bodySmall,
                         color = if (item.sourceUnavailable) {

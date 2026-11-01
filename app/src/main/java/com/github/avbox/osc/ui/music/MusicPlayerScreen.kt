@@ -101,6 +101,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.PI
 import kotlin.math.sin
+import com.github.avbox.osc.ui.components.marqueeOnOverflow
 
 @Composable
 fun MusicPlayerScreen(
@@ -258,7 +259,9 @@ fun MusicPlayerScreen(
                                 fontWeight = if (current) FontWeight.Bold else FontWeight.Normal,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .marqueeOnOverflow(),
                             )
                             if (current) {
                                 Icon(
@@ -316,7 +319,9 @@ private fun MusicSourcePill(sourceName: String) {
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.widthIn(max = 170.dp),
+            modifier = Modifier
+                .widthIn(max = 170.dp)
+                .marqueeOnOverflow(),
         )
     }
 }
@@ -511,6 +516,7 @@ private fun MusicInfo(title: String, subtitle: String) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
+            modifier = Modifier.marqueeOnOverflow(),
             text = title,
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold,
@@ -525,7 +531,9 @@ private fun MusicInfo(title: String, subtitle: String) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 4.dp),
+                modifier = Modifier
+                    .padding(top = 4.dp)
+                    .marqueeOnOverflow(),
             )
         }
     }

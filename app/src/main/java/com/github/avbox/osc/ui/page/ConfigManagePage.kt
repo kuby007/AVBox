@@ -88,6 +88,7 @@ import com.github.avbox.osc.ui.components.TopBarActionBox
 import com.github.avbox.osc.ui.components.glassSurface
 import com.github.avbox.osc.ui.theme.cardContainer
 import com.github.avbox.osc.util.HistoryHelper
+import com.github.avbox.osc.ui.components.marqueeOnOverflow
 
 private fun badgeText(name: String, url: String, emptyText: String): String = when {
     name.isNotEmpty() -> name
@@ -571,7 +572,9 @@ private fun RepoSwitchSheet(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.widthIn(max = 180.dp),
+                                    modifier = Modifier
+                                        .widthIn(max = 180.dp)
+                                        .marqueeOnOverflow(),
                                 )
                             }
                         },
@@ -637,7 +640,9 @@ private fun SubscribeCard(
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .marqueeOnOverflow(),
                     )
                     if (disabled) {
                         Spacer(Modifier.width(8.dp))
@@ -646,6 +651,7 @@ private fun SubscribeCard(
                 }
                 Spacer(Modifier.height(4.dp))
                 Text(
+                    modifier = Modifier.marqueeOnOverflow(),
                     text = item.url,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

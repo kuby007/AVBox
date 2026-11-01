@@ -146,6 +146,7 @@ import com.github.avbox.osc.ui.SiteCardShapeSingle
 import com.github.avbox.osc.ui.SiteKind
 import com.github.avbox.osc.ui.SiteSourceCard
 import com.github.avbox.osc.ui.siteKindOf
+import com.github.avbox.osc.ui.components.marqueeOnOverflow
 
 private val HomeSourceCapsuleMaxWidth = 240.dp
 
@@ -278,7 +279,9 @@ fun HomePage(
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .marqueeOnOverflow(),
                     )
                     Spacer(modifier = Modifier.width(2.dp))
                     Icon(

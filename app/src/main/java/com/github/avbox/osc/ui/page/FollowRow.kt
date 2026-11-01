@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import com.github.avbox.osc.ui.components.marqueeOnOverflow
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -57,6 +56,7 @@ import com.github.avbox.osc.ui.components.joinedDaysText
 import com.github.avbox.osc.ui.theme.SuccessGreen
 import com.github.avbox.osc.ui.theme.cardContainer
 import kotlin.math.roundToInt
+import com.github.avbox.osc.ui.components.marqueeOnOverflow
 
 private val ScheduleIconSize = 16.dp
 
@@ -192,6 +192,7 @@ internal fun FollowRow(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
+                        modifier = Modifier.marqueeOnOverflow(),
                         text = scheduleText,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,

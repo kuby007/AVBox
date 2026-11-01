@@ -47,6 +47,7 @@ import com.github.avbox.osc.util.AppLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.github.avbox.osc.ui.components.marqueeOnOverflow
 
 private const val HERO_SPOTLIGHT_PAGES_PER_SET = 100_000
 
@@ -225,6 +226,7 @@ private fun HeroSpotlightCaption(video: Movie.Video) {
         overflow = TextOverflow.Ellipsis,
         modifier = Modifier
             .fillMaxWidth()
+            .marqueeOnOverflow(),
             .padding(start = 24.dp, end = 24.dp),
     )
     val rating = ratingBadgeText(video.note)

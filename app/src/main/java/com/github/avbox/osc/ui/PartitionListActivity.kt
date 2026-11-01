@@ -78,6 +78,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.github.avbox.osc.ui.page.jumpToSearch
+import com.github.avbox.osc.ui.components.marqueeOnOverflow
 
 class PartitionListActivity : BaseActivity() {
 
@@ -219,6 +220,7 @@ private fun PartitionListScreen(mode: String, videosJson: String?, onBack: () ->
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
         titleContent = {
             Text(
+                modifier = Modifier.marqueeOnOverflow(),
                 text = title,
                 style = MaterialTheme.typography.headlineSmall,
                 color = MaterialTheme.colorScheme.onSurface,

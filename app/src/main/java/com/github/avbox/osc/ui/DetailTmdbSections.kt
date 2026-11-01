@@ -49,6 +49,7 @@ import com.github.avbox.osc.bean.TmdbDetail
 import com.github.avbox.osc.bean.TmdbPerson
 import com.github.avbox.osc.ui.components.AVBoxBottomSheet
 import com.github.avbox.osc.util.TmdbImages
+import com.github.avbox.osc.ui.components.marqueeOnOverflow
 
 private val CastAvatarSize = 80.dp
 
@@ -186,6 +187,7 @@ private fun TmdbCastItem(member: TmdbCastMember, onClick: () -> Unit) {
             textAlign = TextAlign.Center,
             modifier = Modifier
                 .fillMaxWidth()
+                .marqueeOnOverflow(),
                 .padding(top = 6.dp),
         )
     }

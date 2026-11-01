@@ -47,6 +47,7 @@ import com.github.avbox.osc.ui.components.clearFocusOnDrag
 import com.github.avbox.osc.ui.page.ManageActionIcon
 import com.github.avbox.osc.ui.settings.UiSettingsState
 import com.github.avbox.osc.ui.theme.cardContainer
+import com.github.avbox.osc.ui.components.marqueeOnOverflow
 
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
@@ -247,6 +248,7 @@ internal fun SearchIdleContent(
                                             overflow = TextOverflow.Ellipsis,
                                             modifier = Modifier
                                                 .weight(1f)
+                                                .marqueeOnOverflow(),
                                                 .padding(start = 10.dp),
                                         )
                                     }

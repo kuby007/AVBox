@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import com.github.avbox.osc.R
 import com.github.avbox.osc.ui.theme.ContinuousMenuContainer
 import com.github.avbox.osc.ui.theme.ContinuousMenuItem
+import com.github.avbox.osc.ui.components.marqueeOnOverflow
 
 private val OptionMenuMinWidth = 156.dp
 
@@ -129,7 +130,9 @@ private fun OptionMenuCard(
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .marqueeOnOverflow(),
             )
             if (selected) {
                 Spacer(Modifier.width(10.dp))

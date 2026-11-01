@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import com.github.avbox.osc.ui.components.marqueeOnOverflow
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -77,6 +76,7 @@ import com.github.avbox.osc.ui.WindowSize
 import com.github.avbox.osc.ui.theme.ContinuousMenuContainer
 import com.github.avbox.osc.ui.theme.ContinuousMenuItem
 import com.github.avbox.osc.ui.theme.cardContainer
+import com.github.avbox.osc.ui.components.marqueeOnOverflow
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -98,6 +98,7 @@ internal fun HistoryChip(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier
                 .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                .marqueeOnOverflow(),
                 .padding(horizontal = 12.dp, vertical = 6.dp),
         )
     }
@@ -193,7 +194,9 @@ internal fun LayoutSwitchCard(
                 fontWeight = FontWeight.Medium,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .marqueeOnOverflow(),
             )
             if (selected) {
                 Icon(
@@ -516,6 +519,7 @@ internal fun SearchResultRow(
                 if (!video.note.isNullOrBlank()) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
+                        modifier = Modifier.marqueeOnOverflow(),
                         text = video.note.orEmpty(),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -533,7 +537,9 @@ internal fun SearchResultRow(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .marqueeOnOverflow(),
                         )
                     } else {
                         Spacer(modifier = Modifier.weight(1f))
@@ -548,6 +554,7 @@ internal fun SearchResultRow(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier
                                 .widthIn(max = 90.dp)
+                                .marqueeOnOverflow(),
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.7f))
                                 .padding(horizontal = 6.dp, vertical = 2.dp),

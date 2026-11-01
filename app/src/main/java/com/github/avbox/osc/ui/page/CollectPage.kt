@@ -56,6 +56,7 @@ import com.github.avbox.osc.ui.components.VodPoster
 import com.github.avbox.osc.ui.settings.UiSettingsState
 import com.github.avbox.osc.util.SubscribeList
 import kotlinx.coroutines.launch
+import com.github.avbox.osc.ui.components.marqueeOnOverflow
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -233,6 +234,7 @@ private fun CollectCard(
             textAlign = TextAlign.Center,
             modifier = Modifier
                 .fillMaxWidth()
+                .marqueeOnOverflow(),
                 .padding(top = 6.dp),
         )
     }

@@ -106,6 +106,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.github.avbox.osc.ui.components.marqueeOnOverflow
 
 private const val DetailTopScrimAlpha = 0.32f
 
@@ -646,7 +647,9 @@ private fun DetailHeroRatingLine(rating: String?, tail: String, color: Color) {
                 color = color,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false),
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .marqueeOnOverflow(),
             )
         }
     }

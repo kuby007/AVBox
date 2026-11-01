@@ -44,6 +44,7 @@ import com.github.avbox.osc.ui.components.SegmentOption
 import com.github.avbox.osc.ui.components.TopBarActionBox
 import com.github.avbox.osc.util.LocalScriptSource
 import org.json.JSONObject
+import com.github.avbox.osc.ui.components.marqueeOnOverflow
 
 
 
@@ -292,7 +293,9 @@ private fun ActionChip(
         Box(contentAlignment = Alignment.Center) {
             Text(
                 text,
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 8.dp),
+                modifier = Modifier
+                    .padding(horizontal = 6.dp, vertical = 8.dp)
+                    .marqueeOnOverflow(),
                 style = MaterialTheme.typography.labelMedium,
                 color = if (enabled) {
                     MaterialTheme.colorScheme.onSurfaceVariant

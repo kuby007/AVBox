@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import com.github.avbox.osc.R
 import com.github.avbox.osc.player.state.PlayerActions
 import com.github.avbox.osc.player.state.PlayerUiState
+import com.github.avbox.osc.ui.components.marqueeOnOverflow
 
 private val TopBarLineHeight = 36.dp
 
@@ -220,6 +221,7 @@ fun PlayerTopBar(state: PlayerUiState, actions: PlayerActions) {
                             modifier = Modifier.padding(start = playerDim(R.dimen.vs_10)),
                         ) {
                             Text(
+                                modifier = Modifier.marqueeOnOverflow(),
                                 text = state.title,
                                 color = Color.White,
                                 fontSize = playerTextSize(R.dimen.ts_26),
@@ -240,7 +242,9 @@ fun PlayerTopBar(state: PlayerUiState, actions: PlayerActions) {
                                     fontWeight = FontWeight.Medium,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.padding(top = 2.dp),
+                                    modifier = Modifier
+                                        .padding(top = 2.dp)
+                                        .marqueeOnOverflow(),
                                 )
                             }
                         }

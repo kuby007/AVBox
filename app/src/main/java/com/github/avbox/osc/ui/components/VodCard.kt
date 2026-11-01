@@ -21,6 +21,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.github.avbox.osc.bean.Movie
+import com.github.avbox.osc.ui.components.marqueeOnOverflow
 
 enum class VodCardStyle { Overlay, Stacked }
 
@@ -101,6 +102,7 @@ fun VodCard(
                 }
                 if (meta.isNotEmpty()) {
                     Text(
+                        modifier = Modifier.marqueeOnOverflow(),
                         text = meta,
                         style = MaterialTheme.typography.bodyMedium,
                         fontSize = 12.sp,
