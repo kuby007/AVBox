@@ -16,7 +16,7 @@ android {
         applicationId = "com.github.xbox.osc"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = 9
+        versionCode = 35
         versionName = "1.3.2-xbox"
         multiDexEnabled = true
         ndk {
