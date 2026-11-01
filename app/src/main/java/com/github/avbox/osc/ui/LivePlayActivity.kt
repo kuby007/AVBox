@@ -6,6 +6,7 @@ import com.github.avbox.osc.player.pip.PipLauncher
 import com.github.avbox.osc.receiver.PipActionReceiver
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
@@ -218,7 +219,9 @@ class LivePlayActivity : BaseActivity(), PipActionReceiver.PipLiveSwitch {
 
     override fun onPause() {
         super.onPause()
-        if (!exitingLivePlay) kernelView?.pause()
+        // 画中画期间系统同样回调 onPause，此时要继续播，不能停
+        val pip = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode
+        if (!exitingLivePlay && !pip) kernelView?.pause()
     }
 
     override fun onDestroy() {

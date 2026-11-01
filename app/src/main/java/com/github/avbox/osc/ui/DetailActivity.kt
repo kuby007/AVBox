@@ -7,6 +7,7 @@ import android.content.pm.ActivityInfo
 import com.github.avbox.osc.util.KV
 import android.content.res.Configuration
 import android.net.Uri
+import android.os.Build
 import android.os.Looper
 import android.webkit.WebView
 import android.widget.Toast
@@ -511,9 +512,14 @@ class DetailActivity : BaseActivity(), PageHost {
     }
 
     override fun onPause() {
-        playContainer?.hostPause()
+        // 进入画中画时系统同样会回调 onPause，此时绝不能暂停播放，
+        // 否则小窗里是一张静止画面。只有真正切到后台/锁屏才暂停。
+        if (!isInPipMode()) playContainer?.hostPause()
         super.onPause()
     }
+
+    private fun isInPipMode(): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode
 
     override fun onDestroy() {
         playContainer?.cancelCastWait()

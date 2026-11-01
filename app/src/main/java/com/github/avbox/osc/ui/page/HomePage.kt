@@ -102,6 +102,7 @@ import com.github.avbox.osc.net.SiteSearch
 import com.github.avbox.osc.ui.ConfigManageActivity
 import com.github.avbox.osc.ui.PartitionListActivity
 import com.github.avbox.osc.ui.SearchActivity
+import com.github.avbox.osc.ui.WindowSize
 import com.github.avbox.osc.ui.components.AVBoxBottomSheet
 import com.github.avbox.osc.ui.components.AVBoxOptionMenuAction
 import com.github.avbox.osc.ui.components.AppTopBarScaffold
@@ -164,6 +165,7 @@ fun HomePage(
     val navStart = contentPadding.calculateStartPadding(LocalLayoutDirection.current)
     val navBottom = contentPadding.calculateBottomPadding()
     val screenHeightDp = LocalConfiguration.current.screenHeightDp
+    val screenWidthDp = LocalConfiguration.current.screenWidthDp
     val context = LocalContext.current
     val currentSource by vm.currentSource.collectAsStateWithLifecycle()
     val sources by vm.sources.collectAsStateWithLifecycle()
@@ -564,7 +566,11 @@ fun HomePage(
     }
 
     if (showSourceSheet) {
-        val sheetHeight = (screenHeightDp * 0.72f).dp
+        // 横屏时屏幕"高度"其实很短（手机横放只有 360dp 左右），
+        // 仍按 0.72 取的话弹窗只剩两百多 dp，装不下搜索框+分类+列表，
+        // 底部配置管理会把列表挤没。横屏改按接近满屏给高度。
+        val isLandscape = screenWidthDp > screenHeightDp
+        val sheetHeight = (screenHeightDp * if (isLandscape) 0.95f else 0.72f).dp
         AVBoxBottomSheet(
             onDismissRequest = { showSourceSheet = false },
             modifier = Modifier.height(sheetHeight),
@@ -639,7 +645,12 @@ fun HomePage(
             val visible = remember(filtered, sourceKind) {
                 filtered.filter { sourceKind == SiteKind.ALL || siteKindOf(it.api) == sourceKind }
             }
-            val perRow = if (sourceGrid) 2 else 1
+            // 多列模式按屏宽算最佳列数：横屏宽了就多列，别把空间浪费掉
+            val perRow = if (sourceGrid) {
+                WindowSize.listColumns(screenWidthDp - 32, minColumns = 2, maxColumns = 6)
+            } else {
+                1
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
