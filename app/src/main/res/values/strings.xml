@@ -373,6 +373,8 @@
     <string name="theme_distortion">扭曲效果</string>
     <string name="theme_translucency">通透度</string>
     <string name="theme_dispersion">边缘色散</string>
+    <string name="theme_text_scroll">超长文字滚动</string>
+    <string name="theme_text_scroll_hint">标题等单行文字超出宽度时自动滚动显示</string>
     <string name="theme_custom_color">自定义颜色</string>
     <string name="theme_custom_theme">自定义主题</string>
     <string name="theme_mode">主题模式</string>

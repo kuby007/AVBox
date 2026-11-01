@@ -137,4 +137,6 @@ object KVKeys {
     const val HOME_SITE_COLUMNS = "home_site_columns"
     const val PLAY_AUTO_LANDSCAPE = "play_auto_landscape"
     const val PLAY_AUTO_LANDSCAPE_DEFAULT = false
+    const val TEXT_SCROLL_ENABLED = "text_scroll_enabled"
+    const val TEXT_SCROLL_ENABLED_DEFAULT = true
 }

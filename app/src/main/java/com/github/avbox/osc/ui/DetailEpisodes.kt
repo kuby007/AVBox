@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import com.github.avbox.osc.ui.components.marqueeOnOverflow
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsIgnoringVisibility
 import androidx.compose.foundation.layout.padding
@@ -252,6 +253,7 @@ private fun EpisodeCard(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier
                 .fillMaxWidth()
+                .marqueeOnOverflow()
                 .padding(top = 6.dp),
         )
     }
@@ -453,7 +455,9 @@ internal fun EpisodeSheet(vm: DetailViewModel, slideFromEnd: Boolean, showQualit
                                 textAlign = TextAlign.Center,
                                 fontSize = 13.sp,
                                 overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .marqueeOnOverflow(),
                             )
                         },
                         contentPadding = PaddingValues(horizontal = 6.dp),

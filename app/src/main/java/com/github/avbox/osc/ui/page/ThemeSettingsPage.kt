@@ -60,6 +60,7 @@ import com.github.avbox.osc.ui.components.SettingsCardPosition
 import com.github.avbox.osc.ui.components.SettingsGroup
 import com.github.avbox.osc.ui.components.SettingsSwitch
 import com.github.avbox.osc.ui.components.SettingsSwitchRow
+import com.github.avbox.osc.ui.theme.TextScrollState
 import com.github.avbox.osc.ui.components.ThemeColorPickerSheet
 import com.github.avbox.osc.ui.components.TopBarActionBox
 import com.github.avbox.osc.ui.theme.AppThemeState
@@ -242,11 +243,19 @@ fun ThemeSettingsScreen(onNavigateBack: () -> Unit) {
                         valueText = "${(translucencyValue * 100f).roundToInt()}%",
                     )
                 }
-                SettingsCard(SettingsCardPosition.LAST) {
+                SettingsCard(SettingsCardPosition.MIDDLE) {
                     SettingsSwitchRow(
                         title = stringResource(R.string.theme_dispersion),
                         checked = glassConfig.dispersion,
                         onCheckedChange = { LiquidGlassState.dispersion = it },
+                    )
+                }
+                SettingsCard(SettingsCardPosition.LAST) {
+                    SettingsSwitchRow(
+                        title = stringResource(R.string.theme_text_scroll),
+                        subtitle = stringResource(R.string.theme_text_scroll_hint),
+                        checked = TextScrollState.enabled,
+                        onCheckedChange = { TextScrollState.enabled = it },
                     )
                 }
             }

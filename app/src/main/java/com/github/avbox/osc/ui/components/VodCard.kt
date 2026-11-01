@@ -53,6 +53,7 @@ fun VodCard(
                 textAlign = TextAlign.Center,
                 modifier = Modifier
                     .fillMaxWidth()
+                    .marqueeOnOverflow()
                     .padding(top = 6.dp),
             )
         }
@@ -87,6 +88,9 @@ fun VodCard(
                     color = Color.White,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .marqueeOnOverflow(),
                 )
                 val meta = buildString {
                     if (video.year > 0) append(video.year)

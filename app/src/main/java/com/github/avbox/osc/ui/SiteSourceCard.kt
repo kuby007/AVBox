@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.github.avbox.osc.ui.components.marqueeOnOverflow
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -78,7 +79,9 @@ fun SiteSourceCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .marqueeOnOverflow(),
                 )
                 if (!subtitle.isNullOrEmpty()) {
                     Text(
@@ -88,7 +91,10 @@ fun SiteSourceCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .marqueeOnOverflow()
+                            .padding(top = 2.dp),
                     )
                 }
             }
