@@ -172,6 +172,11 @@ class SortLoader(
         }
         val absVideoList = withContext(Dispatchers.IO) { resultParser.json(null, sortJson, sourceBean.key)?.movie?.videoList }
         if (!withRec) {
+            // type 6（html）的宫格只有启动卡，竖版下不赋值就是一片空白，
+            // 用户看不到任何入口 —— 所以这里必须为它单独兜住
+            if (sourceBean.type == 6 && !absVideoList.isNullOrEmpty()) {
+                sortXml.videoList = absVideoList
+            }
             postSortResult(sourceKey, sortXml)
             cacheSort(sourceKey, sortXml)
         } else if (absVideoList != null && absVideoList.size > 0) {

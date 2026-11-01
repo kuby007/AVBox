@@ -41,6 +41,7 @@ class ListLoader(
             return
         }
         val type = sourceBean.type
+        // type 6（html）与 type 3 走同一条 Spider 链路，否则切分类时宫格恒为空
         if (type == 3 || type == 6) {
             listFromSpider(sourceBean, sortData, page)
         } else if (type == 0 || type == 1) {
@@ -142,6 +143,7 @@ class ListLoader(
 
     suspend fun homeRecList(sourceBean: SourceBean, ids: ArrayList<String?>?): MutableList<Movie.Video>? {
         val type = sourceBean.type
+        // type 6（html）与 type 3 走同一条 Spider 链路
         if (type == 3 || type == 6) {
             val sortJson = withContext(Dispatchers.IO) {
                 BoundedCall.call(Callable<String> {

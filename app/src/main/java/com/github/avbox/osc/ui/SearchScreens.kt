@@ -98,8 +98,8 @@ internal fun HistoryChip(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier
                 .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-                .marqueeOnOverflow()
-                .padding(horizontal = 12.dp, vertical = 6.dp),
+                .padding(horizontal = 12.dp, vertical = 6.dp)
+                .marqueeOnOverflow(),
         )
     }
 }
@@ -554,10 +554,10 @@ internal fun SearchResultRow(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier
                                 .widthIn(max = 90.dp)
-                                .marqueeOnOverflow()
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.7f))
-                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                .marqueeOnOverflow(),
                         )
                     }
                 }

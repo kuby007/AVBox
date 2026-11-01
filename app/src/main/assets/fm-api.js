@@ -1,36 +1,35 @@
 /**
- * fm-api.js —— HTML 脚本（type 6）运行时的桥接层。
+ * fm-api.js —— HTML 脚本（type 6）页面可用的原生桥接层。
  *
- * 注入时机：页面加载完成后由 HtmlActivity 注入。
- * 脚本用法（与 Spider 接口一一对应，脚本自己返回数据，不是渲染宫格）：
+ * 范式说明（重要）：
+ *   本 App 的 type 6 采用 WvWv 范式 —— html 是【页面】，自己渲染自己的内容，
+ *   不向宿主返回数据。分类与宫格由 App 自己造，点卡片才把页面拉起来。
+ *   所以这里【不会被调用 homeContent / detailContent 之类的爬虫函数】，
+ *   只提供页面随时可用的原生能力（fm.req 等）。
  *
- *   function homeContent(filter) {
- *       var html = fm.req('https://...');          // 同步请求，自动走站点代理
- *       return { class: [...], list: [...] };     // 直接 return 即可
- *   }
+ * 脚本用法：
+ *   var html = fm.req('https://...');            // 同步请求，自动走站点代理
+ *   var v = fm.getVar('k', '默认值');             // 站点级持久化
+ *   fm.setVar('k', 'value');
+ *   fm.log('调试信息');                           // 输出到 App 日志
  *
- * 也可以异步：fm.done({ class: [...], list: [...] });
+ * 注意 fm.req 是【同步】的（Java 侧 OkHttp 同步执行后把正文返回给 JS），
+ * 返回字符串。页面若用 Promise 包装（如 Promise.resolve().then(...).then(res => ...))，
+ * 字符串也能正常往下走。
  *
- * 说明：fm.req 是【同步】的（Java 侧 OkHttp 同步执行后把正文返回给 JS），
- * 这样脚本不需要写 Promise / await，与 py、js 脚本的写法保持一致。
+ * 关于 fetch：这里【不覆盖】 window.fetch。
+ *   页面自己的 fetch 是完整的（含 headers / status / 流式），而我们的垫片是
+ *   同步取文本再伪造 Response，覆盖后会破坏页面的正常网络行为。
+ *   代理不需要靠覆盖 fetch 实现 —— 子资源请求已由 WebView 的
+ *   shouldInterceptRequest 统一接到 App 网络栈，对页面完全透明。
  */
 (function () {
-  // 注意：不能写 "if (window.fm) return;" —— 同一站点会复用同一个 WebView 页面
-  // （homeContent / homeVideoContent / categoryContent 连续调用），第二次注入时
-  // window.fm 已存在，若直接 return 则 _done 仍是 true，fm.done() 永远被吞掉，
-  // 后续调用全部超时返回空 —— 表现就是"只有启动卡，没有任何数据"。
-  // 所以这里必须允许重复执行：每次都重新绑定方法并把 _done 复位。
+  // 允许重复执行：页面重定向/多次注入时重新绑定方法即可，不能写 "if (window.fm) return;"
   var fm = window.fm;
   if (!fm || typeof fm !== 'object') {
     fm = {};
     window.fm = fm;
   }
-  var _done = false;
-
-  /** 复位回传闸门，供宿主在每次调用脚本前调用 */
-  fm.reset = function () {
-    _done = false;
-  };
 
   fm.log = function (m) {
     try { window.FmBridge.log(String(m)); } catch (e) {}
@@ -70,34 +69,6 @@
     return fm.req(url, { method: 'POST', body: body, headers: headers });
   };
 
-  /**
-   * fetch 垫片：把页面里的 fetch 接到 FmBridge 上。
-   *
-   * 不做这层的话，脚本用 fetch/XHR 取数据时走的是 WebView 自己的网络栈，
-   * 站点代理开关对它完全无效（OkHttp 的 proxySelector 管不到 WebView），
-   * 需要代理的站点就会一直取不到数据。垫片让它跟 fm.req 一样走 App 网络栈。
-   */
-  fm.fetch = function (url, opt) {
-    opt = opt || {};
-    var text = fm.req(url, { method: opt.method || 'GET', headers: opt.headers || {}, body: opt.body || '' });
-    return Promise.resolve({
-      ok: true,
-      status: 200,
-      url: url,
-      text: function () { return Promise.resolve(text); },
-      json: function () {
-        try { return Promise.resolve(JSON.parse(text)); }
-        catch (e) { return Promise.reject(e); }
-      },
-      headers: { get: function () { return null; } }
-    });
-  };
-
-  if (window.__fmFetchPatched !== true) {
-    window.__fmFetchPatched = true;
-    window.fetch = fm.fetch;
-  }
-
   /** 站点 ext 持久化（对应修改扩展参数弹窗写入的值） */
   fm.getVar = function (k, def) {
     try {
@@ -110,17 +81,22 @@
     try { window.FmBridge.setVar(k, String(v)); } catch (e) {}
   };
 
-  /** 回传结果（异步场景用；同步 return 的场景不必调） */
+  /**
+   * 展示模式下的兼容实现：页面若仍调用 fm.done 也不会报错。
+   * 宿主不再等待回传结果，这里只记日志。
+   */
   fm.done = function (result) {
-    if (_done) return;
-    _done = true;
     try {
-      window.FmBridge.done(typeof result === 'string' ? result : JSON.stringify(result == null ? {} : result));
+      window.FmBridge.done(
+        typeof result === 'string' ? result : JSON.stringify(result == null ? {} : result)
+      );
     } catch (e) {
-      fm.log('fm.done failed: ' + e);
-      try { window.FmBridge.done('{}'); } catch (e2) {}
+      try { fm.log('fm.done failed: ' + e); } catch (e2) {}
     }
   };
+
+  /** 复位（保留给需要重复调用的页面，展示模式下无副作用） */
+  fm.reset = function () {};
 
   window.fm = fm;
 })();
