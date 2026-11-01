@@ -66,10 +66,28 @@ class DetailLoader(
         val type = sourceBean.type
         if (type == 3) {
             detailFromSpider(sourceBean, id, fallback, requestToken)
+        } else if (type == 6) {
+            // html 站点：点宫格 = 拉起页面。页面盖在首页上，用户按返回即回首页，
+            // 所以这里【不】postValue —— 不进详情页。
+            launchHtmlOnly(sourceBean, id)
         } else if (type == 0 || type == 1 || type == 4) {
             detailFromApi(sourceBean, id, fallback, requestToken)
         } else {
             detailResult.postValue(createEmptyDetail(key, requestToken))
+        }
+    }
+
+    /** type 6：把这次点击当作"开页面"的信号，调一次 detailContent 拉起 HtmlActivity。 */
+    private suspend fun launchHtmlOnly(sourceBean: SourceBean, id: String) {
+        withContext(Dispatchers.IO) {
+            try {
+                val sp = ApiConfig.get().getCSP(sourceBean)
+                val ids = ArrayList<String>()
+                ids.add(id)
+                SpiderReaper.track(sp) { sp.detailContent(ids) }
+            } catch (e: Exception) {
+                AppLog.i("echo--getDetail--html-error: " + e.message)
+            }
         }
     }
 

@@ -9,11 +9,11 @@ import android.os.Bundle
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.view.KeyEvent
+import android.view.View
 import android.view.ViewGroup
-import android.webkit.ConsoleMessage
+import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
-import android.webkit.JsPromptResult
-import android.webkit.JsResult
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -26,18 +26,21 @@ import java.io.File
 /**
  * HTML 脚本（type 6）的全屏承载页。
  *
- * 采用 WvWv 范式：本页【只是把 html 显示出来】，不参与数据回传。
- * 分类与宫格是宿主自己造的（见 HtmlSpider），点卡片才拉起本页，
- * 拉起后不等任何结果，页面自己渲染自己的内容。
+ * 【定位】html 是【被打开的应用】，不是【数据源】—— 与 appmenu / WvWv 的思路一致：
+ * 分类与宫格由宿主造（一张「启动脚本」卡），页面本身不回传任何数据。
+ * 用户点这张卡 → 拉起本页打开页面 → 页面常驻，用户自己操作 → 按返回关闭。
+ * 页面被误关后再点卡可再次拉起（二次启动）。
  *
- * 三个必须做对的点：
- *   1) 返回键：页面内跳转过（有一级/二级页面）时，第一次返回必须回到上一级，
- *      而不是直接关掉整个页面 —— 见 onBackPressed；
- *   2) 不设 WebChromeClient 时页面里的 alert/confirm/prompt 不会弹出，
- *      脚本会一直等返回值而被"卡死"，所以这里必须接住并给出结果；
- *   3) 本地 html 用 file:// 直接 loadUrl（配 allowUniversalAccessFromFileURLs
- *      后相对资源才解析得到），不要把正文读出来用 loadDataWithBaseURL 塞进去 ——
- *      那会让页面的 baseURI 失真，页内 fetch 被 CORS 打死。
+ * 【WebView 设置参照 appmenu 的 WebHome.Overlay】我们是宿主，不依赖子程序，
+ * 但 WebView 该怎么养是通用工程经验，主流做法缺一项都可能让页面白屏或卡死：
+ *   · 必须 setWebChromeClient —— 缺了它 alert/prompt/console 全不工作，
+ *     不少脚本卡在等一个弹窗上，表现就是「打开后卡死」。
+ *   · 必须 setMediaPlaybackRequiresUserGesture(false) —— 否则页面内音视频要手动点。
+ *   · 必须开 Cookie（含第三方）—— 登录态与同域资源取不到。
+ *   · 返回必须先问 WebView.canGoBack() —— 否则 html 的二级页按返回直接关掉整个页，
+ *     回不到一级页。
+ *   · 关闭时按 stopLoading → 卸桥 → about:blank → clearHistory → destroy 的顺序收，
+ *     直接 destroy 会让 WebView 在渲染线程上未决崩溃。
  */
 class HtmlActivity : Activity() {
 
@@ -45,11 +48,25 @@ class HtmlActivity : Activity() {
         val siteKey: String,
         val api: String,
         val ext: String,
+        val method: String,
+        val args: String,
+        /** 常驻模式：html 是【被打开的应用】，只加载页面、不调用脚本函数、
+         *  不等回传、不自动关闭，由用户按返回关闭。 */
+        val resident: Boolean = false,
+        /** 站点代理地址；非空才接管子资源，为空一律交给 WebView 原生加载。 */
+        val proxy: String = "",
+        val callback: (String?) -> Unit = {},
     )
 
     private var webView: WebView? = null
     private val mainHandler = Handler(Looper.getMainLooper())
+    private var settled = false
+    private var currentReq: Request? = null
     private var curSiteKey: String? = null
+    /** 每次调用只允许注入执行一次：onPageFinished 会因重定向/iframe 触发多次，
+     *  重复执行会让脚本回调两次，Spider 侧拿到第二次的空结果。 */
+    private var invoked = false
+    private var destroyed = false
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -59,64 +76,129 @@ class HtmlActivity : Activity() {
             finish()
             return
         }
-        pending = null
+        pendingRequest = req
+        currentReq = req
         curSiteKey = req.siteKey
         live = this
 
+        val root = android.widget.FrameLayout(this)
+        root.setBackgroundColor(Color.BLACK)
         val wv = WebView(this)
         webView = wv
-        wv.setBackgroundColor(Color.BLACK)
-        setContentView(
+        root.addView(
             wv,
-            ViewGroup.LayoutParams(
+            android.widget.FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT,
             ),
         )
+        setContentView(root)
 
-        setupWebView(wv)
-        wv.addJavascriptInterface(Bridge(req), "FmBridge")
+        setupWebView(wv, req)
+        load(wv, req)
+    }
 
-        wv.webViewClient = object : WebViewClient() {
+    /**
+     * WebView 设置：逐项对齐主流 WebView Spider 的成熟配置。
+     * 少一项都可能是「白屏 / 卡死 / 取不到数据」的直接原因。
+     */
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun setupWebView(v: WebView, req: Request) {
+        v.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            v.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, true)
+        }
+
+        val s = v.settings
+        s.javaScriptEnabled = true
+        s.domStorageEnabled = true
+        // 页面内音视频不要求用户先点击 —— 音乐/播放器类 html 全靠这个
+        s.mediaPlaybackRequiresUserGesture = false
+        // 在线页面常是 https 壳里嵌 http 资源，默认 NEVER_ALLOW 会直接拦掉 → 白屏
+        s.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+        s.useWideViewPort = true
+        s.loadWithOverviewMode = true
+        s.setSupportZoom(false)
+        s.builtInZoomControls = false
+        s.displayZoomControls = false
+        s.textZoom = 100
+        s.cacheMode = WebSettings.LOAD_DEFAULT
+        s.allowFileAccess = true
+        s.allowContentAccess = true
+        s.allowFileAccessFromFileURLs = true
+        @Suppress("DEPRECATION")
+        s.allowUniversalAccessFromFileURLs = true
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            s.offscreenPreRaster = true
+        }
+
+        v.setBackgroundColor(Color.BLACK)
+        v.overScrollMode = View.OVER_SCROLL_NEVER
+        v.scrollBarStyle = View.SCROLLBARS_INSIDE_OVERLAY
+        v.isFocusable = true
+        v.isFocusableInTouchMode = true
+        v.requestFocus()
+
+        try {
+            val cm = CookieManager.getInstance()
+            cm.setAcceptCookie(true)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                cm.setAcceptThirdPartyCookies(v, true)
+            }
+        } catch (ignored: Throwable) {
+        }
+
+        // 缺了这个 alert/prompt/confirm 全部静默失效，脚本卡在等交互上 → 看起来「卡死」
+        v.webChromeClient = WebChromeClient()
+        v.addJavascriptInterface(Bridge(req), "FmBridge")
+
+        v.webViewClient = object : WebViewClient() {
+
+            override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
+                val u = url ?: return true
+                // http/https/file 交给 WebView 自己加载；其余（自定义 scheme）拦下
+                return !(u.startsWith("http://") || u.startsWith("https://")
+                        || u.startsWith("file://"))
+            }
+
             override fun onPageStarted(
                 view: WebView?,
                 url: String?,
                 favicon: android.graphics.Bitmap?,
             ) {
                 // 提前把 fm 挂上：有些脚本在页面顶层就要用 fm.req 预热数据，
-                // 等到 onPageFinished 才注入的话那段代码已经因 fm undefined 崩掉了
-                injectApi()
+                // 等 onPageFinished 才注入的话那段代码已经因 fm undefined 崩掉了
+                injectApiOnly()
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
-                // 页面加载完成后再补一次：重定向过的页面顶层 fm 可能已被覆盖
-                injectApi()
+                // 常驻模式：只保证 fm 桥在页面上，不调用任何脚本函数
+                if (req.resident) injectApiOnly() else injectAndInvoke(req)
             }
 
             /**
-             * 把 http(s) 请求接到 App 网络栈，让站点代理对 WebView 同样生效 ——
-             * WebView 自己是不认 OkHttp 的 proxySelector 的。
-             * 取不到就返回 null，交给 WebView 自己加载，不硬拦。
+             * 子资源接管：只在【站点开了代理】时才接。
+             *
+             * WebView 不认 OkHttp 的 proxySelector，代理对它无效，所以要接管。
+             * 但接管是同步阻塞在 WebView 的 IO 线程上的——页面资源一多就把线程占满，
+             * 表现正是「打开后卡死」。没配代理的站点根本不需要接管，
+             * 一律放行给 WebView 原生，既快又不卡。
              */
             override fun shouldInterceptRequest(
                 view: WebView?,
                 request: android.webkit.WebResourceRequest?,
             ): android.webkit.WebResourceResponse? {
                 val r = request ?: return null
+                if (req.proxy.isBlank()) return null
+                if (r.method != "GET") return null
                 val url = r.url?.toString() ?: return null
                 if (!url.startsWith("http://") && !url.startsWith("https://")) return null
-                // POST 拿不到请求体（Android 硬限制），接管会丢 body，必须放行
-                val method = r.method ?: "GET"
-                if (!method.equals("GET", ignoreCase = true)) return null
+                // 回环地址不能接管，否则自己请求自己 → 死循环
+                val host = r.url?.host
+                if (host == "127.0.0.1" || host == "localhost") return null
                 return try {
-                    // 默认就是 GET，不写 .get() 以兼容不同 OkHttp 版本
-                    val builder = okhttp3.Request.Builder().url(url)
-                    val headers = r.requestHeaders
-                    if (headers != null) {
-                        for ((k, v) in headers) builder.header(k, v ?: "")
-                    }
                     val resp = com.github.catvod.net.OkHttp.client()
-                        .newCall(builder.build())
+                        .newCall(okhttp3.Request.Builder().url(url).build())
                         .execute()
                     val type = resp.header("content-type") ?: "application/octet-stream"
                     val mime = type.split(";")[0].trim()
@@ -133,175 +215,66 @@ class HtmlActivity : Activity() {
                 }
             }
 
+            // 在线 url 打不开（DNS/404/证书…）时立刻交付，别让 Spider 干等 30 秒超时
+            override fun onReceivedError(
+                view: WebView?,
+                errorCode: Int,
+                description: String?,
+                failingUrl: String?,
+            ) {
+                AppLog.i("$TAG: load error $errorCode ${description ?: ""}")
+                // 常驻模式不因加载失败关页：页面留着，用户自己返回
+                if (!req.resident) settle(null)
+            }
+
             override fun onReceivedError(
                 view: WebView?,
                 request: android.webkit.WebResourceRequest?,
                 error: android.webkit.WebResourceError?,
             ) {
-                // 只对主请求生效，子资源失败不算
+                // Android 6+ 走这个重载；只对主请求生效，子资源失败不算
                 if (request != null && !request.isForMainFrame) return
                 AppLog.i("$TAG: load error ${error?.errorCode} ${error?.description}")
+                if (!req.resident) settle(null)
             }
         }
 
-        /**
-         * 接住页面的 alert / confirm / prompt：不接的话这些弹窗不会显示，
-         * 脚本会一直等返回值，表现就是"页面卡死不动"。
-         * 这里统一给确定性的结果，保证脚本能继续往下跑。
-         */
-        wv.webChromeClient = object : WebChromeClient() {
-            override fun onJsAlert(
-                view: WebView?,
-                url: String?,
-                message: String?,
-                result: JsResult?,
-            ): Boolean {
-                AppLog.i("$TAG: js alert ${message ?: ""}")
-                result?.confirm()
-                return true
-            }
+        // 脚本不回调时兜底关闭，避免页面常驻挡住操作
+        // （常驻模式例外：页面本来就该常驻，等用户按返回，不能自己关）
+        if (!req.resident) {
+            mainHandler.postDelayed({ settle(null) }, AUTO_CLOSE_MS)
+        }
+    }
 
-            override fun onJsConfirm(
-                view: WebView?,
-                url: String?,
-                message: String?,
-                result: JsResult?,
-            ): Boolean {
-                AppLog.i("$TAG: js confirm ${message ?: ""}")
-                result?.confirm()
-                return true
-            }
-
-            override fun onJsPrompt(
-                view: WebView?,
-                url: String?,
-                message: String?,
-                defaultValue: String?,
-                result: JsPromptResult?,
-            ): Boolean {
-                AppLog.i("$TAG: js prompt ${message ?: ""} default=${defaultValue ?: ""}")
-                result?.confirm(defaultValue ?: "")
-                return true
-            }
-
-            override fun onConsoleMessage(msg: ConsoleMessage?): Boolean {
-                if (msg != null) {
-                    AppLog.i("$TAG[console]: ${msg.message()} @${msg.lineNumber()}")
+    /**
+     * 加载页面。本地文件直接 loadUrl("file://...")，远程直接 loadUrl(url)。
+     *
+     * 【为什么不再 loadDataWithBaseURL 塞正文】塞进去的页面 baseURI 会失真，
+     * 页面里的相对引用和 fetch 全被打死 —— 表现就是「只出框架、取不到数据」。
+     * 主流做法就是 loadUrl，baseURI 天然正确。
+     */
+    private fun load(wv: WebView, req: Request) {
+        val url = req.api
+        try {
+            when {
+                url.startsWith("http://") || url.startsWith("https://") -> wv.loadUrl(url)
+                url.startsWith("file://") -> wv.loadUrl(url)
+                url.startsWith("/") -> wv.loadUrl("file://$url")
+                url.startsWith("clan://localhost/") -> {
+                    val p = Environment.getExternalStorageDirectory().absolutePath + "/" +
+                        Uri.decode(url.substring("clan://localhost/".length))
+                    wv.loadUrl("file://$p")
                 }
-                return true
+                else -> {
+                    AppLog.i("$TAG: invalid api=$url")
+                    if (!req.resident) settle(null)
+                }
             }
-
-            override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                // 进度过半时再挂一次 fm：极端情况下 onPageStarted 注入会被页面覆盖
-                if (newProgress > 50) injectApi()
-            }
-        }
-
-        val url = normalize(req.api)
-        if (url.isEmpty()) {
-            AppLog.i("$TAG: empty url, close")
-            finish()
-            return
-        }
-        AppLog.i("$TAG: open $url")
-        wv.loadUrl(url)
-    }
-
-    /**
-     * WebView 设置，对齐影视仓 / appmenu 的 WebHome：
-     * 每一项都是实际踩过坑才加的。
-     */
-    @SuppressLint("SetJavaScriptEnabled")
-    private fun setupWebView(v: WebView) {
-        v.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
-        if (Build.VERSION.SDK_INT >= 26) {
-            v.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, true)
-        }
-        if (Build.VERSION.SDK_INT >= 23) v.setOffscreenPreRaster(true)
-
-        val s = v.settings
-        s.javaScriptEnabled = true
-        s.domStorageEnabled = true
-        // 页面里的音视频要能自动起播，否则音乐/影视类 html 点了没反应
-        s.mediaPlaybackRequiresUserGesture = false
-        // 在线页面常是 https 壳里嵌 http 资源，默认 NEVER_ALLOW 会直接拦掉 → 白屏
-        s.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-        s.useWideViewPort = true
-        s.loadWithOverviewMode = true
-        s.setSupportZoom(false)
-        s.builtInZoomControls = false
-        s.displayZoomControls = false
-        s.textZoom = 100
-        s.cacheMode = WebSettings.LOAD_DEFAULT
-        s.allowFileAccess = true
-        s.allowContentAccess = true
-        // 本地 file:// 页面要能取同目录/子目录的资源与 XHR，否则图片和接口全挂
-        s.allowFileAccessFromFileURLs = true
-        s.allowUniversalAccessFromFileURLs = true
-        v.setOverScrollMode(android.view.View.OVER_SCROLL_NEVER)
-        v.setScrollBarStyle(android.view.View.SCROLLBARS_INSIDE_OVERLAY)
-        v.isFocusable = true
-        v.isFocusableInTouchMode = true
-        v.requestFocus()
-
-        try {
-            val cm = android.webkit.CookieManager.getInstance()
-            cm.setAcceptCookie(true)
-            cm.setAcceptThirdPartyCookies(v, true)
-        } catch (ignored: Throwable) {
-        }
-    }
-
-    /**
-     * 返回键：页面内跳转过就先回上一级，没有历史才关掉本页。
-     * 这是"html 二级页面按返回能回到一级页面"的实现点。
-     */
-    override fun onBackPressed() {
-        val wv = webView
-        if (wv != null && wv.canGoBack()) {
-            wv.goBack()
-            return
-        }
-        super.onBackPressed()
-    }
-
-    override fun onDestroy() {
-        if (live === this) live = null
-        val wv = webView
-        webView = null
-        try {
-            wv?.stopLoading()
-            wv?.loadUrl("about:blank")
-            wv?.clearHistory()
-            wv?.removeAllViews()
-            wv?.destroy()
-        } catch (ignored: Throwable) {
-        }
-        super.onDestroy()
-    }
-
-    /** 把 fm-api.js 挂进页面（幂等，页面顶层就能用 fm.req） */
-    private fun injectApi() {
-        val api = readAsset("fm-api.js") ?: return
-        val view = webView
-        if (view == null) return
-        mainHandler.post {
-            try {
-                @Suppress("DEPRECATION")
-                view.evaluateJavascript(api, null)
-            } catch (th: Throwable) {
-                AppLog.e(TAG, th)
-            }
-        }
-    }
-
-    private fun readAsset(name: String): String? =
-        try {
-            assets.open(name).bufferedReader().use { it.readText() }
         } catch (th: Throwable) {
             AppLog.e(TAG, th)
-            null
+            if (!req.resident) settle(null)
         }
+    }
 
     private fun charsetOf(contentType: String?): String {
         if (contentType.isNullOrEmpty()) return "UTF-8"
@@ -311,28 +284,232 @@ class HtmlActivity : Activity() {
             .split(";", ",")[0].trim().trim('"').ifEmpty { "UTF-8" }
     }
 
-    /** api → 可 loadUrl 的地址：本地绝对路径转 file://，远程原样返回 */
-    private fun normalize(api: String): String {
-        val t = api.trim()
-        if (t.startsWith("file://") || t.startsWith("http://") || t.startsWith("https://")) return t
-        val path = resolveLocalPath(api)
-        return if (path != null) Uri.fromFile(File(path)).toString() else t
+    /**
+     * 返回键：先看 WebView 内部有没有上一级页面。
+     * 缺这一步的话，html 的二级页按返回会直接把整个承载页关掉，
+     * 根本回不到一级页 —— 这是之前「二级页面返回不到一级」的直接原因。
+     */
+    @Suppress("MissingSuperCall")
+    override fun onBackPressed() {
+        val wv = webView
+        if (wv != null && wv.canGoBack()) {
+            wv.goBack()
+            return
+        }
+        // 不依赖 super（各版本行为不一，且可能被预测式返回吃掉），直接收掉自己，
+        // 保证「返回一定回到首页宫格」，不会停在过渡页上
+        finishSafely()
     }
 
-    /** 复用配置解析里同一套换算：clan://localhost/x 与 file://x 都落到真实路径 */
-    private fun resolveLocalPath(api: String): String? {
-        var url = api
-        val pk = url.indexOf(";pk;")
-        if (pk >= 0) url = url.substring(0, pk)
-        val q = url.indexOf('?')
-        if (q >= 0) url = url.substring(0, q)
-        if (url.startsWith("clan://localhost/")) {
-            return Environment.getExternalStorageDirectory().absolutePath + "/" +
-                Uri.decode(url.substring("clan://localhost/".length))
+    /** 兜底：部分机型/全屏场景下 onBackPressed 不触发，这里再接一次 */
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            val wv = webView
+            if (wv != null && wv.canGoBack()) {
+                wv.goBack()
+                return true
+            }
+            finishSafely()
+            return true
         }
-        if (url.startsWith("file://")) return Uri.decode(url.substring("file://".length))
-        return if (url.startsWith("/")) url else null
+        return super.onKeyDown(keyCode, event)
     }
+
+    /** 按主流顺序收掉 WebView，避免渲染线程上未决崩溃 */
+    private fun releaseWebView() {
+        val wv = webView ?: return
+        webView = null
+        try {
+            wv.stopLoading()
+            @Suppress("DEPRECATION")
+            wv.removeJavascriptInterface("FmBridge")
+            wv.loadUrl("about:blank")
+            wv.clearHistory()
+            wv.removeAllViews()
+            wv.destroy()
+        } catch (ignored: Throwable) {
+        }
+    }
+
+    private fun finishSafely() {
+        mainHandler.removeCallbacks(idleClose)
+        val left = currentReq
+        currentReq = null
+        try {
+            left?.callback?.invoke(null)
+        } catch (th: Throwable) {
+            AppLog.e(TAG, th)
+        }
+        try {
+            if (!isFinishing && !isDestroyed) finish()
+        } catch (ignored: Throwable) {
+        }
+    }
+
+    override fun onDestroy() {
+        destroyed = true
+        if (live === this) live = null
+        mainHandler.removeCallbacks(idleClose)
+        val left = currentReq
+        currentReq = null
+        try {
+            left?.callback?.invoke(null)
+        } catch (th: Throwable) {
+            AppLog.e(TAG, th)
+        }
+        releaseWebView()
+        super.onDestroy()
+    }
+
+    /** 只把 fm-api.js 挂进页面，不调用任何脚本函数（供 onPageStarted 用） */
+    private fun injectApiOnly() {
+        val api = readAsset("fm-api.js") ?: return
+        val view = webView ?: return
+        mainHandler.post {
+            if (destroyed) return@post
+            try {
+                @Suppress("DEPRECATION")
+                view.evaluateJavascript(api, null)
+            } catch (th: Throwable) {
+                AppLog.e(TAG, th)
+            }
+        }
+    }
+
+    private fun injectAndInvoke(req: Request) {
+        if (invoked) return
+        invoked = true
+        val api = readAsset("fm-api.js") ?: ""
+        val argsArray = argsToArray(req.method, req.args)
+        val script = """
+            (function(){
+              try { $api } catch(e) {}
+              // 复用页面时 fm 已存在，必须先复位回传闸门，否则 fm.done() 被吞
+              try { if (window.fm && typeof window.fm.reset === 'function') window.fm.reset(); } catch(e) {}
+              var fin = function(v){ try { window.fm && window.fm.done(v); } catch(e) {} };
+              try {
+                var fn = window['${req.method}'];
+                if (typeof fn !== 'function') { fin({}); return; }
+                var r = fn.apply(null, $argsArray);
+                // 脚本写成 async / 返回 Promise 时，直接 done(Promise) 会被
+                // JSON.stringify 成 {} —— 必须等它落地再取真实值
+                if (r && typeof r.then === 'function') {
+                  Promise.resolve(r).then(function(v){
+                    fin(v === undefined || v === null ? {} : v);
+                  }).catch(function(e){
+                    try { window.fm && window.fm.log('invoke error: ' + e); } catch(e2) {}
+                    fin({});
+                  });
+                  return;
+                }
+                if (r !== undefined && r !== null) { fin(r); return; }
+                // 同步无返回值：交给脚本自己 fm.done()，这里什么都不做
+              } catch(e) {
+                try { window.fm && window.fm.log('invoke error: ' + e); } catch(e2) {}
+                fin({});
+              }
+            })()
+        """.trimIndent()
+        val view = webView ?: return
+        mainHandler.post {
+            if (destroyed) return@post
+            try {
+                @Suppress("DEPRECATION")
+                view.evaluateJavascript(script, null)
+            } catch (th: Throwable) {
+                AppLog.e(TAG, th)
+                settle(null)
+            }
+        }
+    }
+
+    /** 把 Spider 侧的 JSONObject 还原成脚本函数的实参列表（按 TVBox html 约定的签名顺序） */
+    private fun argsToArray(method: String, args: String): String {
+        val o = try {
+            JSONObject(args)
+        } catch (th: Throwable) {
+            return "[]"
+        }
+        return try {
+            when (method) {
+                "homeContent" -> org.json.JSONArray().put(o.optBoolean("filter")).toString()
+                "homeVideoContent" -> "[]"
+                "categoryContent" -> org.json.JSONArray()
+                    .put(o.optString("tid"))
+                    .put(o.optString("pg"))
+                    .put(o.optBoolean("filter"))
+                    .put(o.optString("extend")).toString()
+                "detailContent" -> org.json.JSONArray().put(o.optJSONArray("ids") ?: org.json.JSONArray()).toString()
+                "searchContent" -> org.json.JSONArray()
+                    .put(o.optString("key"))
+                    .put(o.optBoolean("quick")).toString()
+                "playerContent" -> org.json.JSONArray()
+                    .put(o.optString("flag"))
+                    .put(o.optString("id"))
+                    .put(o.optJSONArray("vipFlags") ?: org.json.JSONArray()).toString()
+                else -> org.json.JSONArray().put(o).toString()
+            }
+        } catch (th: Throwable) {
+            "[]"
+        }
+    }
+
+    /**
+     * 交付结果但【不关页】：同一站点的后续调用（翻页、点宫格…）继续复用本页。
+     * 之前是"每次调用都 startActivity → finish"，首页加载要跑
+     * homeContent / homeVideoContent / categoryContent 三次，于是反复前后台切换。
+     */
+    private fun settle(result: String?) {
+        val req = currentReq ?: pendingRequest ?: return
+        currentReq = null
+        pendingRequest = null
+        try {
+            req.callback.invoke(result)
+        } catch (th: Throwable) {
+            AppLog.e(TAG, th)
+        }
+        // 常驻页面交付后继续活着，不排自动关闭
+        if (req.resident) {
+            mainHandler.removeCallbacks(idleClose)
+            return
+        }
+        mainHandler.removeCallbacks(idleClose)
+        mainHandler.postDelayed(idleClose, IDLE_CLOSE_MS)
+    }
+
+    private val idleClose = Runnable { finishNow() }
+
+    private fun finishNow() {
+        mainHandler.removeCallbacks(idleClose)
+        val left = currentReq
+        currentReq = null
+        try {
+            left?.callback?.invoke(null)
+        } catch (th: Throwable) {
+            AppLog.e(TAG, th)
+        }
+        try {
+            if (!isFinishing && !isDestroyed) finish()
+        } catch (ignored: Throwable) {
+        }
+    }
+
+    /** 复用本页再跑一次脚本（仅 siteKey 相同时调用） */
+    private fun dispatch(req: Request) {
+        mainHandler.removeCallbacks(idleClose)
+        currentReq = req
+        curSiteKey = req.siteKey
+        invoked = false   // 复用本页跑下一次调用，允许再注入一次
+        injectAndInvoke(req)
+    }
+
+    private fun readAsset(name: String): String? =
+        try {
+            assets.open(name).bufferedReader().use { it.readText() }
+        } catch (th: Throwable) {
+            AppLog.e(TAG, th)
+            null
+        }
 
     private inner class Bridge(private val req: Request) {
 
@@ -352,6 +529,7 @@ class HtmlActivity : Activity() {
         fun req(url: String?, headers: String?, method: String?, body: String?): String {
             if (url.isNullOrEmpty()) return ""
             return try {
+                val client = com.github.catvod.net.OkHttp.client()
                 val builder = okhttp3.Request.Builder().url(url)
                 if (!headers.isNullOrEmpty()) {
                     val h = JSONObject(headers)
@@ -365,9 +543,7 @@ class HtmlActivity : Activity() {
                 val payload = if (body.isNullOrEmpty()) null
                 else okhttp3.RequestBody.create(null, body)
                 builder.method(m, payload)
-                val resp = com.github.catvod.net.OkHttp.client()
-                    .newCall(builder.build())
-                    .execute()
+                val resp = client.newCall(builder.build()).execute()
                 val text = resp.body?.string() ?: ""
                 resp.close()
                 text
@@ -394,55 +570,56 @@ class HtmlActivity : Activity() {
             }
         }
 
-        /** 展示模式下没有"回传数据"这回事，仅记日志，页面调了也不会出错 */
         @JavascriptInterface
         fun done(result: String?) {
-            AppLog.i("$TAG: fm.done ignored in view mode: ${result ?: ""}")
+            mainHandler.post { settle(result) }
         }
     }
 
     companion object {
         private const val TAG = "HtmlActivity"
+        private const val AUTO_CLOSE_MS = 30_000L
+        private const val IDLE_CLOSE_MS = 8_000L
 
         @Volatile
         var pending: Request? = null
 
         @Volatile
+        private var pendingRequest: Request? = null
+
+        @Volatile
         var live: HtmlActivity? = null
 
-        /**
-         * 拉起页面展示 html。
-         *
-         * 可以在任意线程调用（Spider 侧跑在 IO 线程），内部统一切主线程。
-         * 同站点页面已存活时不再重建 —— 重建会让页面重新加载、闪烁，
-         * 也就是用户说的"点了没反应/又重头加载"。
-         */
+        /** 站点相同则复用已存活的页面再跑一次，返回 true 表示已投递、无需新建 */
         @JvmStatic
-        fun open(siteKey: String, api: String, ext: String) {
-            Handler(Looper.getMainLooper()).post {
-                try {
-                    val act = live
-                    if (act != null && !act.isFinishing && !act.isDestroyed) {
-                        if (act.curSiteKey == siteKey) {
-                            AppLog.i("$TAG: already showing, ignore reopen")
-                            return@post
-                        }
-                        // 换站点：先收掉旧页面
-                        live = null
-                        act.finish()
-                    }
-                    pending = Request(siteKey, api, ext)
-                    val starter = resolveStarter() ?: return@post
-                    val intent = android.content.Intent(starter, HtmlActivity::class.java)
-                    if (starter !is Activity) {
-                        // 用 Application 启动必须带 NEW_TASK，但会被压到别的 task，
-                        // 所以只在实在拿不到栈顶 Activity 时兜底
-                        intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                    starter.startActivity(intent)
-                } catch (th: Throwable) {
-                    AppLog.e(TAG, th)
-                }
+        fun dispatchToLive(req: Request): Boolean {
+            val act = live ?: return false
+            if (act.isFinishing || act.isDestroyed) {
+                live = null
+                return false
+            }
+            if (act.curSiteKey != req.siteKey) return false
+            act.dispatch(req)
+            return true
+        }
+
+        /** 页面已存活且是同一站点：把它调到前台，不再新建。返回 true 表示已处理。 */
+        @JvmStatic
+        fun bringToFront(siteKey: String): Boolean {
+            val act = live ?: return false
+            if (act.isFinishing || act.isDestroyed) {
+                live = null
+                return false
+            }
+            if (act.curSiteKey != siteKey) return false
+            return try {
+                val i = android.content.Intent(act, HtmlActivity::class.java)
+                i.addFlags(android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                act.startActivity(i)
+                true
+            } catch (th: Throwable) {
+                AppLog.e(TAG, th)
+                false
             }
         }
 
@@ -452,37 +629,11 @@ class HtmlActivity : Activity() {
             pending = null
             val act = live ?: return
             live = null
-            act.mainHandler.post {
-                try {
-                    act.finish()
-                } catch (ignored: Throwable) {
-                }
-            }
-        }
-
-        /**
-         * 取栈顶 Activity 作为启动上下文，拿不到才退回 Application。
-         * 用 Application + NEW_TASK 启动常把页面压到别的 task 后面，
-         * 表现就是"页面被首页遮住"。
-         */
-        private fun resolveStarter(): android.content.Context? {
-            val stack = try {
-                com.github.avbox.osc.util.ActivityStack.getInstance()
-            } catch (th: Throwable) {
-                null
-            }
-            if (stack != null) {
-                try {
-                    val top = stack.currentActivity()
-                    if (!top.isFinishing && !top.isDestroyed) return top
-                } catch (th: Throwable) {
-                    // 栈为空等，忽略，走下面的兜底
-                }
-            }
-            return com.github.avbox.osc.util.AppContextHolder.context()
+            act.mainHandler.post { act.finishNow() }
         }
 
         private fun varKey(siteKey: String, key: String?): String =
             "html_var_" + siteKey + "_" + (key ?: "")
+
     }
 }
