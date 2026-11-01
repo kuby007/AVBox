@@ -248,7 +248,7 @@ internal fun SearchIdleContent(
                                             overflow = TextOverflow.Ellipsis,
                                             modifier = Modifier
                                                 .weight(1f)
-                                                .marqueeOnOverflow(),
+                                                .marqueeOnOverflow()
                                                 .padding(start = 10.dp),
                                         )
                                     }

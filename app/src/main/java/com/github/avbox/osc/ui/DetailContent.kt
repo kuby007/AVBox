@@ -135,7 +135,7 @@ internal fun DetailContent(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier
                                 .padding(start = 12.dp)
-                                .marqueeOnOverflow(),
+                                .marqueeOnOverflow()
                                 .widthIn(max = 180.dp),
                         )
                     }

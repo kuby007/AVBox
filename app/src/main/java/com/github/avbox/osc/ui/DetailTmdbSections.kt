@@ -187,7 +187,7 @@ private fun TmdbCastItem(member: TmdbCastMember, onClick: () -> Unit) {
             textAlign = TextAlign.Center,
             modifier = Modifier
                 .fillMaxWidth()
-                .marqueeOnOverflow(),
+                .marqueeOnOverflow()
                 .padding(top = 6.dp),
         )
     }

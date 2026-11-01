@@ -234,7 +234,7 @@ private fun CollectCard(
             textAlign = TextAlign.Center,
             modifier = Modifier
                 .fillMaxWidth()
-                .marqueeOnOverflow(),
+                .marqueeOnOverflow()
                 .padding(top = 6.dp),
         )
     }
