@@ -41,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.github.avbox.osc.R
+import com.github.avbox.osc.ui.components.marqueeOnOverflow
 
 @Composable
 internal fun SectionTitleIcon(painter: Painter) {
@@ -154,6 +155,9 @@ private fun SourceCard(name: String, selected: Boolean, onClick: () -> Unit) {
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .fillMaxWidth()
+                .marqueeOnOverflow(),
         )
     }
 }
