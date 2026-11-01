@@ -135,8 +135,8 @@ internal fun DetailContent(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier
                                 .padding(start = 12.dp)
-                                .widthIn(max = 180.dp)
                                 .marqueeOnOverflow(),
+                                .widthIn(max = 180.dp),
                         )
                     }
                     LazyRow(

@@ -34,7 +34,10 @@ class HtmlActivity : Activity() {
         val ext: String,
         val method: String,
         val args: String,
-        val callback: (String?) -> Unit,
+        /** 常驻模式：html 是【被打开的应用】，只加载页面、不调用脚本函数、
+         *  不等回传、不自动关闭，由用户按返回关闭。 */
+        val resident: Boolean = false,
+        val callback: (String?) -> Unit = {},
     )
 
     private var webView: WebView? = null
@@ -79,7 +82,10 @@ class HtmlActivity : Activity() {
         wv.addJavascriptInterface(Bridge(req), "FmBridge")
 
         // 脚本不回调时兜底关闭，避免页面常驻挡住操作
-        mainHandler.postDelayed({ settle(null) }, AUTO_CLOSE_MS)
+        // （常驻模式例外：页面本来就该常驻，等用户按返回，不能自己关）
+        if (!req.resident) {
+            mainHandler.postDelayed({ settle(null) }, AUTO_CLOSE_MS)
+        }
 
         wv.webViewClient = object : WebViewClient() {
             override fun onPageStarted(
@@ -93,7 +99,8 @@ class HtmlActivity : Activity() {
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
-                injectAndInvoke(req)
+                // 常驻模式：只保证 fm 桥在页面上，不调用任何脚本函数
+                if (req.resident) injectApiOnly() else injectAndInvoke(req)
             }
 
             /**
@@ -137,7 +144,8 @@ class HtmlActivity : Activity() {
                 failingUrl: String?,
             ) {
                 AppLog.i("$TAG: load error $errorCode ${description ?: ""}")
-                settle(null)
+                // 常驻模式不因加载失败关页：页面留着，用户自己返回
+                if (!req.resident) settle(null)
             }
 
             override fun onReceivedError(
@@ -148,7 +156,7 @@ class HtmlActivity : Activity() {
                 // Android 6+ 走这个重载；只对主请求生效，子资源失败不算
                 if (request != null && !request.isForMainFrame) return
                 AppLog.i("$TAG: load error ${error?.errorCode} ${error?.description}")
-                settle(null)
+                if (!req.resident) settle(null)
             }
         }
 
@@ -321,6 +329,11 @@ class HtmlActivity : Activity() {
         } catch (th: Throwable) {
             AppLog.e(TAG, th)
         }
+        // 常驻页面交付后继续活着，不排自动关闭
+        if (req.resident) {
+            mainHandler.removeCallbacks(idleClose)
+            return
+        }
         mainHandler.removeCallbacks(idleClose)
         mainHandler.postDelayed(idleClose, IDLE_CLOSE_MS)
     }
@@ -480,6 +493,26 @@ class HtmlActivity : Activity() {
             if (act.curSiteKey != req.siteKey) return false
             act.dispatch(req)
             return true
+        }
+
+        /** 页面已存活且是同一站点：把它调到前台，不再新建。返回 true 表示已处理。 */
+        @JvmStatic
+        fun bringToFront(siteKey: String): Boolean {
+            val act = live ?: return false
+            if (act.isFinishing || act.isDestroyed) {
+                live = null
+                return false
+            }
+            if (act.curSiteKey != siteKey) return false
+            return try {
+                val i = android.content.Intent(act, HtmlActivity::class.java)
+                i.addFlags(android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                act.startActivity(i)
+                true
+            } catch (th: Throwable) {
+                AppLog.e(TAG, th)
+                false
+            }
         }
 
         /** 立刻收掉页面（切站点 / spider 销毁时） */
