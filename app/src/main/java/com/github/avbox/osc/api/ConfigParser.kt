@@ -119,6 +119,7 @@ object ConfigParser {
             sb.playerUrl = DefaultConfig.safeJsonString(obj, "playUrl", "")
             sb.ext = DefaultConfig.safeJsonString(obj, "ext", "")
             sb.jar = DefaultConfig.safeJsonString(obj, "jar", "")
+            sb.homePage = DefaultConfig.safeJsonString(obj, "homePage", "")
             sb.proxy = DefaultConfig.safeJsonString(obj, "proxy", "")
             sb.playerType = DefaultConfig.safeJsonInt(obj, "playerType", -1)
             sb.categories = DefaultConfig.safeJsonStringList(obj, "categories")
@@ -130,6 +131,16 @@ object ConfigParser {
             sb.indexs = DefaultConfig.safeJsonInt(obj, "indexs", 0)
             sb.danmaku = DefaultConfig.safeJsonInt(obj, "danmaku", 1)
             sb.header = parseHeaderObject(obj, "header")
+            // 旧版 type 6（html 站点）统一迁移为内置 Csp_Nostr + 顶层 homePage。
+            // 我们自己是宿主：html 由内置 Csp 处理，不再保留 type 6 分支。
+            if (sb.type == 6) {
+                val page = sb.api ?: ""
+                if (page.isNotEmpty()) {
+                    sb.homePage = page
+                    sb.api = com.github.avbox.osc.spider.BuiltinSpiders.HTML_API
+                    sb.type = 3
+                }
+            }
             SiteExt.apply(sb)
             val extPreview = sb.ext
             AppLog.i("echo-site:" + sb.name + " icon:" + sb.icon

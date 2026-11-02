@@ -64,12 +64,12 @@ class DetailLoader(
             return
         }
         val type = sourceBean.type
-        if (type == 3) {
-            detailFromSpider(sourceBean, id, fallback, requestToken)
-        } else if (type == 6) {
-            // html 站点：点宫格 = 拉起页面。页面盖在首页上，用户按返回即回首页，
+        if (type == 3 && com.github.avbox.osc.spider.BuiltinSpiders.isHtmlLaunch(sourceBean.api)) {
+            // 内置 html 站点：点宫格 = 拉起页面。页面盖在首页上，用户按返回即回首页，
             // 所以这里【不】postValue —— 不进详情页。
             launchHtmlOnly(sourceBean, id)
+        } else if (type == 3) {
+            detailFromSpider(sourceBean, id, fallback, requestToken)
         } else if (type == 0 || type == 1 || type == 4) {
             detailFromApi(sourceBean, id, fallback, requestToken)
         } else {

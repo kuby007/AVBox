@@ -51,6 +51,13 @@ class SourceBean {
             field = safeString(value)
         }
 
+    /** 内置 html 站点的页面地址（配置顶层字段，不是 ext 里的键） */
+    var homePage: String? = null
+        get() = safeString(field)
+        set(value) {
+            field = safeString(value)
+        }
+
     // 站点级代理：空或不存在=不代理；填任意值=启用代理（"proxy" 等占位值取设置里的代理地址）
     var proxy: String? = null
         get() = safeString(field)

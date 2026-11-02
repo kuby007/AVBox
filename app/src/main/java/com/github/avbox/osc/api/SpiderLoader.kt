@@ -350,12 +350,16 @@ class SpiderLoader {
 
     fun getCSP(sourceBean: SourceBean): Spider {
         val api = sourceBean.api ?: ""
-        // type 6 = html 脚本，必须先看 type 再看后缀：
-        // 在线录入的 url 常常不带 .html 结尾（如 https://x.com/spider?a=1），
-        // 只看后缀会被当成 jar 去下载，必然失败 —— 这就是「url 的 html 打不开」。
-        if (sourceBean.type == TYPE_HTML) {
+        // 宿主内置 Csp（如 Csp_Nostr）优先：命中注册表就走我们自己的实现，
+        // 不查外部 jar；注册表里没有的 api 仍照旧往下走。
+        if (com.github.avbox.osc.spider.BuiltinSpiders.match(api)) {
             currentPyKey = ""
-            return HtmlSpider(sourceBean.key, sourceBean.api, sourceBean.ext)
+            return com.github.avbox.osc.spider.BuiltinSpiders.create(
+                sourceBean.key,
+                sourceBean.homePage,
+                sourceBean.ext,
+                sourceBean.proxy,
+            )
         }
         if (api.endsWith(".js") || api.contains(".js?")) {
             currentPyKey = ""
@@ -365,10 +369,14 @@ class SpiderLoader {
             pyLoader.setRecentPyKey(currentPyKey)
             return pyLoader.getSpider(requireNotNull(sourceBean.key) { "source key missing" }, sourceBean.api, sourceBean.ext)
         } else if (api.endsWith(".html") || api.contains(".html?")) {
-            // type 6：html 脚本。与 js/py 走同一套 Spider 接口，
-            // 数据由脚本 return 回来，WebView 只负责跑脚本。
+            // 本地/在线 html：交给内置 Csp 处理，页面地址即 api 本身。
             currentPyKey = ""
-            return HtmlSpider(sourceBean.key, sourceBean.api, sourceBean.ext)
+            return com.github.avbox.osc.spider.BuiltinSpiders.create(
+                sourceBean.key,
+                sourceBean.api,
+                sourceBean.ext,
+                sourceBean.proxy,
+            )
         } else {
             currentPyKey = ""
             return jarLoader.getSpider(sourceBean.key, sourceBean.api, sourceBean.ext, sourceBean.jar)

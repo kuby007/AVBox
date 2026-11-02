@@ -182,14 +182,14 @@ class RemoteServer(port: Int, context: Context) : NanoHTTPD(port) {
                         }
                         if (localFile.isFile) {
                             try {
-                                return NanoHTTPD.newChunkedResponse(NanoHTTPD.Response.Status.OK, "application/octet-stream", FileInputStream(localFile))
+                                return NanoHTTPD.newChunkedResponse(NanoHTTPD.Response.Status.OK, mimeOf(file), FileInputStream(localFile))
                             } catch (ignored: Throwable) {
                                 AppLog.d("RemoteServer", "file open failed, fallback to tree grant")
                             }
                         }
                         val granted = if (isLocalRequest(session)) LocalSourceTree.open(requireNotNull(AppContextHolder.context()) { "app context not initialized" }, f) else null
                         if (granted != null) {
-                            return NanoHTTPD.newChunkedResponse(NanoHTTPD.Response.Status.OK, "application/octet-stream", granted)
+                            return NanoHTTPD.newChunkedResponse(NanoHTTPD.Response.Status.OK, mimeOf(file), granted)
                         }
                         return NanoHTTPD.newFixedLengthResponse(NanoHTTPD.Response.Status.INTERNAL_ERROR, NanoHTTPD.MIME_PLAINTEXT, "File $file not found!")
                     } catch (th: Throwable) {
@@ -485,6 +485,31 @@ class RemoteServer(port: Int, context: Context) : NanoHTTPD(port) {
                 buffer.write(raw)
             }
             return buffer.readByteString().toByteArray()
+        }
+    }
+
+    /**
+     * 按扩展名返回正确的 MIME。
+     * 以前一律返回 application/octet-stream，WebView 拿到后只会【触发下载、不渲染】——
+     * html 页面经由 http://127.0.0.1:9978/file/ 打开时表现为"打不开/白屏"。
+     */
+    private fun mimeOf(pathOrName: String): String {
+        val lower = pathOrName.substringAfterLast('/').lowercase()
+        return when {
+            lower.endsWith(".html") || lower.endsWith(".htm") -> "text/html; charset=UTF-8"
+            lower.endsWith(".js") || lower.endsWith(".mjs") -> "application/javascript; charset=UTF-8"
+            lower.endsWith(".css") -> "text/css; charset=UTF-8"
+            lower.endsWith(".json") -> "application/json; charset=UTF-8"
+            lower.endsWith(".xml") -> "application/xml; charset=UTF-8"
+            lower.endsWith(".txt") || lower.endsWith(".md") || lower.endsWith(".log") -> "text/plain; charset=UTF-8"
+            lower.endsWith(".png") -> "image/png"
+            lower.endsWith(".jpg") || lower.endsWith(".jpeg") -> "image/jpeg"
+            lower.endsWith(".gif") -> "image/gif"
+            lower.endsWith(".webp") -> "image/webp"
+            lower.endsWith(".svg") -> "image/svg+xml"
+            lower.endsWith(".mp4") -> "video/mp4"
+            lower.endsWith(".m3u8") -> "application/vnd.apple.mpegurl"
+            else -> "application/octet-stream"
         }
     }
 }

@@ -94,9 +94,17 @@ fun SiteManageScreen(
     val visibleSites = sites.filter { filter == SiteKind.ALL || siteKindOf(it.api()) == filter }
     val visibleBac = bac.filter { filter == SiteKind.ALL || siteKindOf(it.api()) == filter }
 
+    // 页内任何操作都【不】立刻触发全局重载：那会重新载入订阅源并连带把当前页面顶掉，
+    // 表现就是"点一下分类/开关就退出站点管理"。只重读本地目录（很轻），
+    // 全局重载推迟到【离开本页】时补做一次，回到首页照样是最新数据。
+    var dirty by remember { mutableStateOf(false) }
+    val leave: () -> Unit = {
+        if (dirty) onReloadSource()
+        onBack()
+    }
     val refresh: () -> Unit = {
         reload++
-        onReloadSource()
+        dirty = true
     }
 
     AppTopBarScaffold(
@@ -111,7 +119,7 @@ fun SiteManageScreen(
             TopBarActionBox(
                 iconRes = R.drawable.ic_arrow_left,
                 contentDescription = "返回",
-                onClick = onBack,
+                onClick = leave,
             )
         },
     ) { topPad, _ ->

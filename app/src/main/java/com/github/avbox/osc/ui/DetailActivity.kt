@@ -40,6 +40,7 @@ import com.github.avbox.osc.util.SpiderStorageNotice
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.launch
 import com.github.avbox.osc.util.KVKeys
+import com.github.avbox.osc.ui.WindowSize
 
 private const val SYSBAR_APPEARANCE_REASSERT_DELAY_MS = 400L
 
@@ -466,8 +467,24 @@ class DetailActivity : BaseActivity(), PageHost {
     }
 
     private fun lockPortrait() {
+        // 横屏原生设备（车机 / 横置平板 / 电视盒）被强锁竖屏会直接没法操作，
+        // 开了「跟随系统旋转」时也不该强行扳方向 —— 这两种情况恢复默认策略即可。
+        if (!shouldForcePortraitAfterFullscreen()) {
+            portraitLockPending = false
+            requestedOrientation = orientationPolicyValue()
+            return
+        }
         portraitLockPending = true
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+    }
+
+    private fun shouldForcePortraitAfterFullscreen(): Boolean {
+        val follow = KV.get(
+            KVKeys.ORIENTATION_FOLLOW_SYSTEM,
+            KVKeys.ORIENTATION_FOLLOW_SYSTEM_DEFAULT
+        )
+        if (follow) return false
+        return WindowSize.shouldLockPortrait(resources.configuration.smallestScreenWidthDp)
     }
 
     /**
