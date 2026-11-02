@@ -54,6 +54,9 @@ import com.github.avbox.osc.ui.SiteSourceCard
 import com.github.avbox.osc.ui.SiteKind
 import com.github.avbox.osc.api.ApiConfig
 import com.github.avbox.osc.ui.siteKindOf
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.fillMaxHeight
 
 @Composable
 fun SearchSettingsSheet(onDismiss: () -> Unit, onSelectionChanged: () -> Unit) {
@@ -111,119 +114,155 @@ fun SearchSettingsSheet(onDismiss: () -> Unit, onSelectionChanged: () -> Unit) {
             )
         },
     ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-            SettingsGroup(title = null) {
-                SettingsCard(
-                    position = SettingsCardPosition.SINGLE,
-                    color = MaterialTheme.colorScheme.surfaceBright,
-                    shape = SiteCardShapeSingle,
-                ) {
-                    SettingsSwitchRow(
-                        title = stringResource(R.string.search_exact),
-                        checked = exactMatch,
-                        onCheckedChange = {
-                            exactMatch = it
-                            SearchSettingsState.exactMatch = it
-                        },
-                    )
+        val sheetLandscape = cfg.screenWidthDp > cfg.screenHeightDp && cfg.screenWidthDp >= 640
+        val matchToggle: @Composable () -> Unit = {
+                SettingsGroup(title = null) {
+                    SettingsCard(
+                        position = SettingsCardPosition.SINGLE,
+                        color = MaterialTheme.colorScheme.surfaceBright,
+                        shape = SiteCardShapeSingle,
+                    ) {
+                        SettingsSwitchRow(
+                            title = stringResource(R.string.search_exact),
+                            checked = exactMatch,
+                            onCheckedChange = {
+                                exactMatch = it
+                                SearchSettingsState.exactMatch = it
+                            },
+                        )
+                    }
                 }
-            }
-            CapsuleSegmentedButton(
-                options = SiteKind.values().map { SegmentOption(it.label, it) },
-                selectedValue = kind,
-                onOptionSelected = { kind = it },
-                style = SegmentStyle.Separated,
-                containerColor = MaterialTheme.colorScheme.surfaceBright,
-                pressMorph = true,
-                textStyle = MaterialTheme.typography.labelMedium,
-                contentPadding = DenseSegmentContentPadding,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 12.dp, bottom = 4.dp),
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = stringResource(R.string.search_sites),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = if (selected.isEmpty()) {
-                            stringResource(R.string.search_sites_none_hint)
-                        } else {
-                            stringResource(R.string.search_sites_selected_hint, selected.size, allKeys.size)
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                IconButton(onClick = { reloadTick++ }) {
-                    Icon(
-                        imageVector = Icons.Outlined.Refresh,
-                        contentDescription = stringResource(R.string.common_refresh),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-                TextButton(onClick = { applySelection(allKeys) }) { Text(stringResource(R.string.common_select_all)) }
-                TextButton(onClick = { applySelection(allKeys - selected) }) { Text(stringResource(R.string.common_invert_selection)) }
-            }
-            if (visible.isEmpty()) {
-                Text(
-                    text = stringResource(R.string.search_sites_empty),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(vertical = 12.dp),
+        }
+        val kindChips: @Composable () -> Unit = {
+                CapsuleSegmentedButton(
+                    options = SiteKind.values().map { SegmentOption(it.label, it) },
+                    selectedValue = kind,
+                    onOptionSelected = { kind = it },
+                    style = SegmentStyle.Separated,
+                    containerColor = MaterialTheme.colorScheme.surfaceBright,
+                    pressMorph = true,
+                    textStyle = MaterialTheme.typography.labelMedium,
+                    contentPadding = DenseSegmentContentPadding,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp, bottom = 4.dp),
                 )
-            } else {
-                Column(
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 20.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+        }
+        val siteHeader: @Composable () -> Unit = {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    visible.chunked(2).forEach { pair ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(2.dp),
-                        ) {
-                            val left = pair[0]
-                            val leftKey = left.key.orEmpty()
-                            SiteSourceCard(
-                                name = left.name?.takeIf { it.isNotEmpty() } ?: leftKey,
-                                selected = leftKey in selected,
-                                dotOnLeft = true,
-                                shape = SiteCardShapeLeft,
-                                onClick = {
-                                    onApplySelection(
-                                        if (leftKey in selected) selected - leftKey else selected + leftKey,
-                                    )
-                                },
-                                modifier = Modifier.weight(1f),
-                            )
-                            val right = pair.getOrNull(1)
-                            if (right != null) {
-                                val rightKey = right.key.orEmpty()
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.search_sites),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            text = if (selected.isEmpty()) {
+                                stringResource(R.string.search_sites_none_hint)
+                            } else {
+                                stringResource(R.string.search_sites_selected_hint, selected.size, allKeys.size)
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    IconButton(onClick = { reloadTick++ }) {
+                        Icon(
+                            imageVector = Icons.Outlined.Refresh,
+                            contentDescription = stringResource(R.string.common_refresh),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                    TextButton(onClick = { applySelection(allKeys) }) { Text(stringResource(R.string.common_select_all)) }
+                    TextButton(onClick = { applySelection(allKeys - selected) }) { Text(stringResource(R.string.common_invert_selection)) }
+                }
+        }
+        val siteGrid: @Composable (Modifier) -> Unit = { panelModifier ->
+                if (visible.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.search_sites_empty),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 12.dp),
+                    )
+                } else {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 20.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        visible.chunked(2).forEach { pair ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                val left = pair[0]
+                                val leftKey = left.key.orEmpty()
                                 SiteSourceCard(
-                                    name = right.name?.takeIf { it.isNotEmpty() } ?: rightKey,
-                                    selected = rightKey in selected,
-                                    dotOnLeft = false,
-                                    shape = SiteCardShapeRight,
+                                    name = left.name?.takeIf { it.isNotEmpty() } ?: leftKey,
+                                    selected = leftKey in selected,
+                                    dotOnLeft = true,
+                                    shape = SiteCardShapeLeft,
                                     onClick = {
                                         onApplySelection(
-                                            if (rightKey in selected) selected - rightKey else selected + rightKey,
+                                            if (leftKey in selected) selected - leftKey else selected + leftKey,
                                         )
                                     },
                                     modifier = Modifier.weight(1f),
                                 )
-                            } else {
-                                Spacer(Modifier.weight(1f))
+                                val right = pair.getOrNull(1)
+                                if (right != null) {
+                                    val rightKey = right.key.orEmpty()
+                                    SiteSourceCard(
+                                        name = right.name?.takeIf { it.isNotEmpty() } ?: rightKey,
+                                        selected = rightKey in selected,
+                                        dotOnLeft = false,
+                                        shape = SiteCardShapeRight,
+                                        onClick = {
+                                            onApplySelection(
+                                                if (rightKey in selected) selected - rightKey else selected + rightKey,
+                                            )
+                                        },
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                } else {
+                                    Spacer(Modifier.weight(1f))
+                                }
                             }
                         }
                     }
                 }
+        }
+        if (sheetLandscape) {
+            Row(modifier = Modifier.fillMaxSize()) {
+                Column(
+                    modifier = Modifier
+                        .weight(0.64f)
+                        .fillMaxHeight()
+                        .padding(start = 16.dp, end = 8.dp),
+                ) {
+                    siteHeader()
+                    siteGrid(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()))
+                }
+                Column(
+                    modifier = Modifier
+                        .weight(0.36f)
+                        .fillMaxHeight()
+                        .padding(start = 8.dp, end = 16.dp, top = 12.dp),
+                ) {
+                    matchToggle()
+                    kindChips()
+                }
+            }
+        } else {
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                matchToggle()
+                kindChips()
+                siteHeader()
+                siteGrid(Modifier.fillMaxWidth())
             }
         }
     }
