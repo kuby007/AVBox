@@ -1,10 +1,13 @@
 package com.github.avbox.osc.util
 
+import com.github.avbox.osc.spider.BuiltinSpiders
+import com.github.avbox.osc.server.RemoteServer
 import com.github.avbox.osc.util.AppLog
 
 import org.json.JSONArray
 import org.json.JSONObject
 
+import android.os.Environment
 import java.io.File
 
 /**
@@ -85,7 +88,8 @@ object LocalScriptSource {
         return EXTS.firstOrNull { n.endsWith(it) } ?: ""
     }
 
-    private fun typeOf(ext: String): Int = if (ext == ".py" || ext == ".js") 3 else 6
+    /** 全部走 type 3：py / js 走脚本通道，html 走宿主内置 Csp_Nostr。 */
+    private fun typeOf(ext: String): Int = 3
 
     private fun labelOf(ext: String): String = when (ext) {
         ".py" -> "[py]"
@@ -118,13 +122,58 @@ object LocalScriptSource {
         o.put("key", keyOf(root, file))
         o.put("name", file.nameWithoutExtension + label)
         o.put("type", typeOf(ext))
-        o.put("api", "file://" + file.absolutePath)
+        if (ext == ".html" || ext == ".htm") {
+            // html 站点：走宿主内置 Csp，页面地址放【顶层 homePage】
+            o.put("api", BuiltinSpiders.HTML_API)
+            o.put("homePage", fileHomePage(file))
+        } else {
+            o.put("api", "file://" + file.absolutePath)
+        }
         o.put("ext", "")
         o.put("proxy", proxyOf(root, file))
         o.put("searchable", 1)
         o.put("changeable", 1)
         o.put("quickSearch", 1)
         return o
+    }
+
+    /**
+     * 本地 html 的页面地址：走宿主自己的文件服务 http://127.0.0.1:<port>/file/<相对外存路径>
+     * 端口不写死 —— 9978 被占用时 ControlManager 会自动后挪。
+     */
+    private fun fileHomePage(file: File): String {
+        val root = Environment.getExternalStorageDirectory().absolutePath.trimEnd('/')
+        val abs = file.absolutePath
+        val rel = if (abs.startsWith(root)) abs.substring(root.length).trimStart('/') else abs.trimStart('/')
+        return "http://127.0.0.1:" + RemoteServer.serverPort + "/file/" + rel
+    }
+
+    /** html 条目（api 已是 Csp_Nostr）背后的本地文件路径，用于判断文件还在不在 */
+    private fun htmlLocalPath(o: JSONObject): String? {
+        val raw = o.optString("homePage")
+        val marker = "/file/"
+        val idx = raw.indexOf(marker)
+        if (idx < 0) return null
+        val rel = raw.substring(idx + marker.length)
+        return if (rel.startsWith("/")) rel
+        else Environment.getExternalStorageDirectory().absolutePath.trimEnd('/') + "/" + rel
+    }
+
+    /** 老数据迁移：type 6 一律换成 type 3 + 内置 Csp_Nostr + 顶层 homePage */
+    private fun migrate(o: JSONObject): Boolean {
+        val api = o.optString("api")
+        var home = o.optString("homePage")
+        val isHtmlFile = api.endsWith(".html", true) || api.endsWith(".htm", true)
+        if (home.isBlank() && isHtmlFile) {
+            val p = localPathOf(api)
+            if (p != null) home = fileHomePage(File(p))
+        }
+        if (home.isBlank() && isRemote(api)) home = api
+        if (home.isBlank()) return false
+        o.put("type", 3)
+        o.put("api", BuiltinSpiders.HTML_API)
+        o.put("homePage", home)
+        return true
     }
 
     private fun readStore(dir: String): JSONObject {
@@ -191,6 +240,11 @@ object LocalScriptSource {
         for (o in sites) liveKeys.add(o.optString("key"))
         for (o in bac) liveKeys.add(o.optString("key"))
 
+        // 老数据迁移：type 6（旧 html 站点）统一换成 type 3 + Csp_Nostr + 顶层 homePage
+        var migrated = false
+        for (o in sites) if (migrate(o)) migrated = true
+        for (o in bac) if (migrate(o)) migrated = true
+
         // 规则 4：两边都清掉已不存在的本地文件条目
         purgeGone(sites, foundPaths)
         purgeGone(bac, foundPaths)
@@ -205,7 +259,7 @@ object LocalScriptSource {
             changed = true
         }
 
-        if (changed) save(dir, sites, bac)
+        if (changed || migrated) save(dir, sites, bac)
         return Pair(sites, bac)
     }
 
@@ -213,8 +267,11 @@ object LocalScriptSource {
         val it = list.iterator()
         while (it.hasNext()) {
             val o = it.next()
-            if (!isFileBacked(o.optString("api"))) continue
-            val p = localPathOf(o.optString("api")) ?: continue
+            val api = o.optString("api")
+            val home = o.optString("homePage")
+            // 远程条目（含远程 html 页面）永不自动删除
+            if (isRemote(api) || isRemote(home)) continue
+            val p = localPathOf(api) ?: htmlLocalPath(o) ?: continue
             if (!foundPaths.containsKey(p)) it.remove()
         }
     }
@@ -265,8 +322,9 @@ object LocalScriptSource {
         val o = JSONObject()
         o.put("key", (MD5.encode(url) ?: url).take(12))
         o.put("name", uniqueName(name.ifBlank { url } + "[url]", taken))
-        o.put("type", 6)
-        o.put("api", url)
+        o.put("type", 3)
+        o.put("api", BuiltinSpiders.HTML_API)
+        o.put("homePage", url)
         o.put("ext", "")
         o.put("proxy", proxy)
         o.put("searchable", 1)

@@ -130,6 +130,8 @@ enum class SiteKind(val label: String) {
 fun siteKindOf(api: String?): SiteKind {
     val raw = api.orEmpty().trim()
     if (raw.isEmpty()) return SiteKind.OTHER
+    // 宿主内置 Csp（html 站点，本地文件与远程 url 都走它）统一归到 html 类
+    if (com.github.avbox.osc.spider.BuiltinSpiders.match(raw)) return SiteKind.HTML
     val lower = raw.substringBefore('?').substringBefore('#').lowercase()
     return when {
         lower.endsWith(".py") -> SiteKind.PY
