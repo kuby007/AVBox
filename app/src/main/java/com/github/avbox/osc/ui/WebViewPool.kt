@@ -2,99 +2,45 @@ package com.github.avbox.osc.ui
 
 import android.app.Activity
 import android.content.Context
-import android.content.MutableContextWrapper
 import android.os.Handler
 import android.os.Looper
-import android.view.ViewGroup
-import android.webkit.WebChromeClient
 import android.webkit.WebView
-import android.webkit.WebViewClient
 
 /**
- * 进程级 WebView 复用池。
+ * WebView 内核预热。
  *
- * 【为什么】以前每次点开 html 都 new WebView(this)，返回时 destroy()。
- * Android 上 WebView 首次初始化要几百毫秒，每次都付一遍 —— 这就是"在线 html
- * 比浏览器慢"的真因，不是网络慢、也不是脚本慢。主流做法是把它当常驻容器：
- * 预热一次，点开只是 attach + loadUrl，返回 detach 不销毁，第二次起接近浏览器速度。
+ * 【为什么不再复用实例】进程级复用同一个 WebView 实例、返回时只 detach 不销毁：
+ * about:blank 是异步的，旧的 JS 上下文、setInterval、音视频、未决网络回调可能还活着，
+ * 下一次 attach 立刻 loadUrl 会与它竞争 —— 表现就是「返回宫格后脚本没完全销毁」。
+ * 稳定优先：每次承载页自己 new WebView(activity)，关闭时按完整顺序 destroy。
  *
- * 用 MutableContextWrapper 包 Application context 创建，attach 时把 base 换成当前
- * Activity（页面内 alert / 选文件 / 媒体全屏都需要 Activity 的 theme 与窗口），
- * detach 时换回 Application，避免承载页 finish 后被 WebView 持有导致泄漏。
- *
- * 创建失败（极少数 ROM）时返回 null，调用方退回原来的 new WebView(activity)，
- * 功能不退化，只是不复用。
+ * 快不靠复用脏实例，靠【内核预热】：Android 上第一次创建 WebView 要加载 chromium
+ * 内核（几百毫秒），之后 new WebView() 几乎零成本。启动时创建一个立刻销毁，
+ * 把这段耗时挪出「点开页面」的关键路径即可，不需要留一个实例在池里。
  */
 object WebViewPool {
 
-    private val main = Handler(Looper.getMainLooper())
-
     @Volatile
-    private var appCtx: Context? = null
-    private var wrapper: MutableContextWrapper? = null
-    private var web: WebView? = null
+    private var warmed = false
 
-    @Volatile
-    private var unavailable = false
-
-    /** 应用启动后预热一次，把首次初始化的耗时挪出"点开页面"的关键路径。 */
+    /** 应用启动后预热一次内核；不保留实例。 */
     @JvmStatic
     fun warm(app: Context) {
-        appCtx = app.applicationContext
-        main.postDelayed({
+        if (warmed) return
+        warmed = true
+        Handler(Looper.getMainLooper()).postDelayed({
             try {
-                ensure()
+                WebView(app.applicationContext).destroy()
             } catch (ignored: Throwable) {
             }
         }, 800L)
     }
 
-    /** 只在主线程调用 */
-    private fun ensure(): WebView? {
-        if (unavailable) return null
-        web?.let { return it }
-        val ctx = appCtx ?: return null
-        return try {
-            val w = MutableContextWrapper(ctx)
-            val v = WebView(w)
-            wrapper = w
-            web = v
-            v
-        } catch (th: Throwable) {
-            unavailable = true
-            null
-        }
-    }
-
-    /** 主线程调用；返回可复用的 WebView，null 表示调用方需自行新建（不复用） */
+    /** 不再复用实例：始终返回 null，由承载页自己创建、自己销毁。 */
     @JvmStatic
-    fun attach(activity: Activity): WebView? {
-        appCtx = activity.applicationContext
-        val v = ensure() ?: return null
-        (v.parent as? ViewGroup)?.removeView(v)
-        wrapper?.baseContext = activity
-        return v
-    }
+    fun attach(activity: Activity): WebView? = null
 
-    /**
-     * 与承载页解绑，但【不 destroy】。
-     * 先换成空 client 再 about:blank，否则会触发上一轮 client 的 onPageStarted /
-     * onPageFinished，把上一次的请求又注入执行一遍。
-     */
+    /** 保留空实现，兼容旧调用点。 */
     @JvmStatic
-    fun detach() {
-        val v = web ?: return
-        try {
-            (v.parent as? ViewGroup)?.removeView(v)
-            v.stopLoading()
-            @Suppress("DEPRECATION")
-            v.removeJavascriptInterface("FmBridge")
-            v.webViewClient = object : WebViewClient() {}
-            v.webChromeClient = WebChromeClient()
-            v.loadUrl("about:blank")
-            v.clearHistory()
-        } catch (ignored: Throwable) {
-        }
-        appCtx?.let { wrapper?.baseContext = it }
-    }
+    fun detach() {}
 }

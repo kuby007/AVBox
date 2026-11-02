@@ -68,8 +68,6 @@ class HtmlActivity : Activity() {
      *  重复执行会让脚本回调两次，Spider 侧拿到第二次的空结果。 */
     private var invoked = false
     private var destroyed = false
-    /** WebViewPool 创建失败时退回自己 new 的 WebView，这种才由本页 destroy */
-    private var ownedWebView = false
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -87,9 +85,10 @@ class HtmlActivity : Activity() {
         val root = android.widget.FrameLayout(this)
         root.setBackgroundColor(Color.BLACK)
         // 复用进程级 WebView：首次点开才付初始化成本，之后 attach + loadUrl 即可
-        val reused = WebViewPool.attach(this)
-        val wv = reused ?: WebView(this)
-        ownedWebView = reused == null
+        // 每次承载页持有自己的 WebView 实例，返回时完整销毁。
+        // 不再复用实例：复用时 about:blank 异步未完成就下一次 loadUrl，
+        // 旧页面的 JS 定时器 / 音视频 / 未决回调会继续活着（脚本没死透）。
+        val wv = WebViewPool.attach(this) ?: WebView(this)
         webView = wv
         root.addView(
             wv,
@@ -110,8 +109,6 @@ class HtmlActivity : Activity() {
      */
     @SuppressLint("SetJavaScriptEnabled")
     private fun setupWebView(v: WebView, req: Request) {
-        // 页面地址统一由 HtmlUrl 归一化，本地 /file/ 与远程 http 在这里分流
-        val page = HtmlUrl.normalize(req.api)
         v.setLayerType(View.LAYER_TYPE_HARDWARE, null)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             v.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, true)
@@ -130,10 +127,10 @@ class HtmlActivity : Activity() {
         s.builtInZoomControls = false
         s.displayZoomControls = false
         s.textZoom = 100
-        // 远程页面走缓存优先：LOAD_DEFAULT 每次都回源校验，二次打开明显慢。
-        // 本地 /file/ 页面保持 LOAD_DEFAULT —— 文件改了要立刻生效，不能被缓存挡住。
-        s.cacheMode = if (page.local) WebSettings.LOAD_DEFAULT
-        else WebSettings.LOAD_CACHE_ELSE_NETWORK
+        // 统一 LOAD_DEFAULT：缓存优先会把一次失败的空响应/半成品缓存住，
+        // 下次直接白屏 —— 这正是「有些在线页面加载不出来」的根因。
+        // WebView 仍按 HTTP 缓存头走正常缓存，不需要宿主额外改策略。
+        s.cacheMode = WebSettings.LOAD_DEFAULT
         s.allowFileAccess = true
         s.allowContentAccess = true
         s.allowFileAccessFromFileURLs = true
@@ -191,43 +188,18 @@ class HtmlActivity : Activity() {
             }
 
             /**
-             * 子资源接管：只在【站点开了代理】时才接。
+             * 不接管任何子资源。
              *
-             * WebView 不认 OkHttp 的 proxySelector，代理对它无效，所以要接管。
-             * 但接管是同步阻塞在 WebView 的 IO 线程上的——页面资源一多就把线程占满，
-             * 表现正是「打开后卡死」。没配代理的站点根本不需要接管，
-             * 一律放行给 WebView 原生，既快又不卡。
+             * 以前在站点配了代理时，对每个子资源同步 OkHttp.execute()：
+             * 串行、无超时、阻塞在 WebView 的 IO 线程上，页面资源一多就假死，
+             * 这是「在线 html 比浏览器慢 / 打开后卡死」的头号原因。
+             * WebView 与 Chrome 同内核同网络栈，全部交回原生加载才是浏览器速度；
+             * 真需要走代理的脚本用 FmBridge.req（宿主网络栈，已有）。
              */
             override fun shouldInterceptRequest(
                 view: WebView?,
                 request: android.webkit.WebResourceRequest?,
-            ): android.webkit.WebResourceResponse? {
-                val r = request ?: return null
-                if (req.proxy.isBlank()) return null
-                if (r.method != "GET") return null
-                val url = r.url?.toString() ?: return null
-                if (!url.startsWith("http://") && !url.startsWith("https://")) return null
-                // 回环地址不能接管，否则自己请求自己 → 死循环
-                val host = r.url?.host
-                if (host == "127.0.0.1" || host == "localhost") return null
-                return try {
-                    val resp = com.github.catvod.net.OkHttp.client()
-                        .newCall(okhttp3.Request.Builder().url(url).build())
-                        .execute()
-                    val type = resp.header("content-type") ?: "application/octet-stream"
-                    val mime = type.split(";")[0].trim()
-                    android.webkit.WebResourceResponse(
-                        mime,
-                        charsetOf(type),
-                        resp.code,
-                        if (resp.message.isNullOrEmpty()) "OK" else resp.message,
-                        emptyMap<String, String>(),
-                        resp.body?.byteStream(),
-                    )
-                } catch (th: Throwable) {
-                    null
-                }
-            }
+            ): android.webkit.WebResourceResponse? = null
 
             // 在线 url 打不开（DNS/404/证书…）时立刻交付，别让 Spider 干等 30 秒超时
             override fun onReceivedError(
@@ -237,8 +209,9 @@ class HtmlActivity : Activity() {
                 failingUrl: String?,
             ) {
                 AppLog.i("$TAG: load error $errorCode ${description ?: ""}")
-                // 常驻模式不因加载失败关页：页面留着，用户自己返回
-                if (!req.resident) settle(null)
+                // 常驻模式不因加载失败关页：页面留着，用户自己返回；
+                // 但必须提示，否则就是一片白屏干等，看起来像「加载不出来」
+                if (!req.resident) settle(null) else showLoadError(description)
             }
 
             override fun onReceivedError(
@@ -249,7 +222,7 @@ class HtmlActivity : Activity() {
                 // Android 6+ 走这个重载；只对主请求生效，子资源失败不算
                 if (request != null && !request.isForMainFrame) return
                 AppLog.i("$TAG: load error ${error?.errorCode} ${error?.description}")
-                if (!req.resident) settle(null)
+                if (!req.resident) settle(null) else showLoadError(error?.description?.toString())
             }
         }
 
@@ -279,6 +252,20 @@ class HtmlActivity : Activity() {
         } catch (th: Throwable) {
             AppLog.e(TAG, th)
             if (!req.resident) settle(null)
+        }
+    }
+
+    private fun showLoadError(desc: String?) {
+        mainHandler.post {
+            if (destroyed) return@post
+            try {
+                android.widget.Toast.makeText(
+                    this@HtmlActivity,
+                    "页面加载失败：${desc ?: "网络错误"}",
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+            } catch (ignored: Throwable) {
+            }
         }
     }
 
@@ -328,16 +315,16 @@ class HtmlActivity : Activity() {
     private fun releaseWebView() {
         val wv = webView ?: return
         webView = null
-        if (!ownedWebView) {
-            WebViewPool.detach()
-            return
-        }
         try {
             wv.stopLoading()
             @Suppress("DEPRECATION")
             wv.removeJavascriptInterface("FmBridge")
+            wv.webViewClient = object : WebViewClient() {}
+            wv.webChromeClient = WebChromeClient()
             wv.loadUrl("about:blank")
             wv.clearHistory()
+            wv.onPause()
+            (wv.parent as? ViewGroup)?.removeView(wv)
             wv.removeAllViews()
             wv.destroy()
         } catch (ignored: Throwable) {
@@ -376,6 +363,9 @@ class HtmlActivity : Activity() {
 
     /** 只把 fm-api.js 挂进页面，不调用任何脚本函数（供 onPageStarted 用） */
     private fun injectApiOnly() {
+        // 每次 onPageStarted / onPageFinished 都挂一次：重定向会重建 JS 上下文，
+        // 只注入一次会让新页面丢掉 fm。fm-api.js 自身幂等（window.fm 已存在则跳过），
+        // 重复注入不会重复执行脚本回调，开销可忽略。
         val api = readAsset("fm-api.js") ?: return
         val view = webView ?: return
         mainHandler.post {
