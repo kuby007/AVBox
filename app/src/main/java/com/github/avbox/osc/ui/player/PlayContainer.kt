@@ -440,6 +440,14 @@ class PlayContainer(activity: Activity) : FrameLayout(activity), CustomAdapt, Pl
         state.updateLockState(LockVisibility.GONE)
     }
 
+    /** 退出画中画后恢复控制栏与侧边按钮（旋转 / 画中画 / 锁定） */
+    fun restoreControllerUiAfterPip() {
+        val state = playerController.getUiState()
+        state.updateLockState(
+            if (state.previewMode) LockVisibility.GONE else LockVisibility.SHOWN
+        )
+    }
+
     fun showPreloadReady() = overlays.showPreloadReady()
 
     fun hidePreloadReady() = overlays.hidePreloadReady()

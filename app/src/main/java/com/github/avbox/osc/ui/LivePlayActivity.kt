@@ -299,6 +299,9 @@ class LivePlayActivity : BaseActivity(), PipActionReceiver.PipLiveSwitch {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         if (isInPictureInPictureMode) {
             hideControllerUiForPip()
+        } else {
+            vm.setOverlayVisible(true)
+            vm.setFullscreen(false)
         }
     }
 

@@ -111,11 +111,9 @@ class DetailActivity : BaseActivity(), PageHost {
                 }
                 if (vm.exitingFullscreen.value) return
                 if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
-                    // 横屏返回第一步：只转回竖屏（等同点播放器旋转按钮），播放页保持不退出。
-                    // 再按一次返回才退出全屏、回到详情页
+                    // 横屏播放按返回：先让播放器消费（关闭弹层等）；
+                    // 否则直接退出全屏回到详情页，并保持当前横屏，不做任何方向强制
                     if (container != null && container.onBackPressed()) return
-                    lockPortrait()
-                    return
                 }
                 if (vm.fullScreen.value) {
                     if (container != null && container.onBackPressed()) return
@@ -162,9 +160,12 @@ class DetailActivity : BaseActivity(), PageHost {
         newConfig: android.content.res.Configuration,
     ) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
-        playContainer?.uiState()?.clearOverlays()
         if (isInPictureInPictureMode) {
+            playContainer?.uiState()?.clearOverlays()
             playContainer?.hideControllerUiForPip()
+        } else {
+            // 退出小窗必须恢复控制栏，否则旋转 / 画中画 / 锁定三颗侧边按钮全部消失
+            playContainer?.restoreControllerUiAfterPip()
         }
     }
 
@@ -385,8 +386,9 @@ class DetailActivity : BaseActivity(), PageHost {
             portraitLockPending = false
             requestedOrientation = orientationPolicyValue()
         } else {
-            // 退出全屏后只要还在横屏，就锁回竖屏
-            lockPortrait()
+            // 退出全屏不做任何方向强制：横屏播完回详情页仍是横屏，竖屏播完仍是竖屏
+            portraitLockPending = false
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
         if (full) {
             armVideoSizeWatch()
@@ -467,24 +469,8 @@ class DetailActivity : BaseActivity(), PageHost {
     }
 
     private fun lockPortrait() {
-        // 横屏原生设备（车机 / 横置平板 / 电视盒）被强锁竖屏会直接没法操作，
-        // 开了「跟随系统旋转」时也不该强行扳方向 —— 这两种情况恢复默认策略即可。
-        if (!shouldForcePortraitAfterFullscreen()) {
-            portraitLockPending = false
-            requestedOrientation = orientationPolicyValue()
-            return
-        }
         portraitLockPending = true
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
-    }
-
-    private fun shouldForcePortraitAfterFullscreen(): Boolean {
-        val follow = KV.get(
-            KVKeys.ORIENTATION_FOLLOW_SYSTEM,
-            KVKeys.ORIENTATION_FOLLOW_SYSTEM_DEFAULT
-        )
-        if (follow) return false
-        return WindowSize.shouldLockPortrait(resources.configuration.smallestScreenWidthDp)
     }
 
     /**
