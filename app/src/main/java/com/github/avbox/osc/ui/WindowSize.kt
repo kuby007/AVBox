@@ -51,7 +51,10 @@ object WindowSize {
     const val CARD_TITLE_HEIGHT_DP = 44
 
     /** 卡片宽度下限，横屏再挤也不让卡片小到看不清 */
-    const val MIN_CARD_WIDTH_DP = 72
+    const val MIN_CARD_WIDTH_DP = 100
+
+    /** 横屏下卡片下方标题区更紧凑，给海报让出高度 */
+    const val CARD_TITLE_HEIGHT_LANDSCAPE_DP = 34
 
     /**
      * 行式列表（站点列表）列数：只由宽度决定，保证至少 [minColumns] 列。
@@ -80,12 +83,14 @@ object WindowSize {
         availableHeightDp: Int,
         minColumns: Int,
         minRows: Int,
+        landscape: Boolean = false,
     ): Int {
         if (availableWidthDp <= 0) return minColumns
+        val titleHeight = if (landscape) CARD_TITLE_HEIGHT_LANDSCAPE_DP else CARD_TITLE_HEIGHT_DP
         val byWidth = gridColumns(availableWidthDp, minColumns)
         if (availableHeightDp <= 0) return byWidth
         val targetRowHeight = availableHeightDp.toFloat() / minRows.coerceAtLeast(1)
-        val cardHeight = targetRowHeight - CARD_TITLE_HEIGHT_DP - GRID_COLUMN_SPACING_DP
+        val cardHeight = targetRowHeight - titleHeight - GRID_COLUMN_SPACING_DP
         if (cardHeight <= MIN_CARD_WIDTH_DP) {
             // 高度实在不够，退化为"尽量多列、卡片取最小可读宽度"
             val cap = (availableWidthDp / (MIN_CARD_WIDTH_DP + GRID_COLUMN_SPACING_DP))

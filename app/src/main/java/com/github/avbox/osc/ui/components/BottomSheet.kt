@@ -178,6 +178,8 @@ private val SheetMaxWidth = 640.dp
 
 private const val SheetMaxHeightFraction = 0.9f
 
+private const val SheetMaxHeightFractionLandscape = 0.96f
+
 private const val SHEET_END_WIDTH_FRACTION = 0.45f
 
 private const val SHEET_SLIDE_DURATION_MS = 280
@@ -375,7 +377,10 @@ private fun SheetSurface(
     var panelHeightPx by remember { mutableIntStateOf(0) }
     var panelWidthPx by remember { mutableIntStateOf(0) }
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val panelMaxHeight = maxHeight * SheetMaxHeightFraction
+        // 横屏时窗口高度只有 390dp 上下，再按 0.9 截断会让弹窗只剩一条缝，
+        // 内容全被挤没。横屏放宽到 0.96，让弹窗尽量用满可用高度。
+        val panelMaxHeight = maxHeight *
+            (if (maxWidth > maxHeight) SheetMaxHeightFractionLandscape else SheetMaxHeightFraction)
         val panelMaxWidth = minOf(SheetMaxWidth, maxWidth * SHEET_END_WIDTH_FRACTION)
         Box(
             modifier = Modifier

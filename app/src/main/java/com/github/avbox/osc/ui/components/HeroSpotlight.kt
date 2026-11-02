@@ -67,9 +67,21 @@ private val HeroSpotlightMinHeight = 360.dp
 
 private val HeroSpotlightMaxHeight = 560.dp
 
-internal fun heroSpotlightHeight(screenHeightDp: Int): Dp =
-    (screenHeightDp * HERO_SPOTLIGHT_HEIGHT_RATIO).dp
-        .coerceIn(HeroSpotlightMinHeight, HeroSpotlightMaxHeight)
+private val HeroSpotlightLandscapeMinHeight = 120.dp
+
+private const val HERO_LANDSCAPE_HEIGHT_RATIO = 0.42f
+
+internal fun heroSpotlightHeight(screenHeightDp: Int, screenWidthDp: Int = 0): Dp {
+    val raw = (screenHeightDp * HERO_SPOTLIGHT_HEIGHT_RATIO).dp
+    // 横屏时屏幕"高度"其实只有 390dp 上下，继续套 360dp 下限会让 Hero 独占整屏，
+    // 下面的宫格连一行都露不出来。横屏改按屏高比例压缩，给宫格让出空间。
+    if (screenWidthDp > screenHeightDp) {
+        return raw
+            .coerceAtMost((screenHeightDp * HERO_LANDSCAPE_HEIGHT_RATIO).dp)
+            .coerceAtLeast(HeroSpotlightLandscapeMinHeight)
+    }
+    return raw.coerceIn(HeroSpotlightMinHeight, HeroSpotlightMaxHeight)
+}
 
 @Composable
 fun HeroSpotlight(
@@ -87,7 +99,8 @@ fun HeroSpotlight(
         initialPage = count * (HERO_SPOTLIGHT_PAGES_PER_SET / 2),
         pageCount = { count * HERO_SPOTLIGHT_PAGES_PER_SET },
     )
-    val heroHeight = heroSpotlightHeight(LocalConfiguration.current.screenHeightDp)
+    val heroCfg = LocalConfiguration.current
+    val heroHeight = heroSpotlightHeight(heroCfg.screenHeightDp, heroCfg.screenWidthDp)
     val current = videos[pagerState.currentPage % count]
     val scope = rememberCoroutineScope()
     var pendingPic by remember { mutableStateOf<String?>(null) }

@@ -51,6 +51,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -152,13 +153,16 @@ fun HomeGridLayout(
             val tabSort = tabPartition?.sort ?: sorts.firstOrNull { it.id == tabId }
             val tabGridState = gridStates.getOrPut(tabId) { LazyGridState() }
             BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val isLandscape = LocalConfiguration.current.screenWidthDp >
+                LocalConfiguration.current.screenHeightDp
             val gridColumns = WindowSize.smartGridColumns(
                 availableWidthDp = (maxWidth - 32.dp - navStart).value.toInt(),
                 availableHeightDp = (
-                    maxHeight - HomeGridContentTopPadding - 64.dp
+                    maxHeight - HomeGridContentTopPadding - 24.dp
                     ).value.toInt(),
                 minColumns = 3,
                 minRows = 1,
+                landscape = isLandscape,
             )
             LazyVerticalGrid(
                 columns = GridCells.Fixed(gridColumns),
@@ -174,7 +178,8 @@ fun HomeGridLayout(
                     start = 16.dp + navStart,
                     end = 16.dp,
                     top = HomeGridContentTopPadding,
-                    bottom = 88.dp + contentPadding.calculateBottomPadding(),
+                    bottom = (if (isLandscape) 24.dp else 88.dp) +
+                        contentPadding.calculateBottomPadding(),
                 ),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(HomeGridItemSpacing),

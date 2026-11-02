@@ -70,7 +70,10 @@ fun SearchSettingsSheet(onDismiss: () -> Unit, onSelectionChanged: () -> Unit) {
     val homeLayout by HomeSettings.layoutFlow.collectAsStateWithLifecycle()
     var exactMatch by remember { mutableStateOf(SearchSettingsState.exactMatch) }
 
-    val maxSheetHeight = (LocalConfiguration.current.screenHeightDp * 0.7f).dp
+    val cfg = LocalConfiguration.current
+    // 横屏时屏高很短，0.7 会把内容压成一条缝，改按 0.92 取
+    val sheetRatio = if (cfg.screenWidthDp > cfg.screenHeightDp) 0.92f else 0.7f
+    val maxSheetHeight = (cfg.screenHeightDp * sheetRatio).dp
 
     AVBoxBottomSheet(
         onDismissRequest = onDismiss,

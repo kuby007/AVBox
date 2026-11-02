@@ -463,14 +463,14 @@ fun HomePage(
                             SkeletonBox(
                                 modifier = Modifier
                                     .fillParentMaxWidth()
-                                    .height(heroSpotlightHeight(screenHeightDp)),
+                                    .height(heroSpotlightHeight(screenHeightDp, screenWidthDp)),
                             )
                         }
                         rec.state == HomeViewModel.PartitionState.Error -> {
                             Box(
                                 modifier = Modifier
                                     .fillParentMaxWidth()
-                                    .height(heroSpotlightHeight(screenHeightDp))
+                                    .height(heroSpotlightHeight(screenHeightDp, screenWidthDp))
                                     .background(MaterialTheme.colorScheme.surfaceContainer),
                                 contentAlignment = Alignment.Center,
                             ) {
@@ -570,10 +570,17 @@ fun HomePage(
         // 仍按 0.72 取的话弹窗只剩两百多 dp，装不下搜索框+分类+列表，
         // 底部配置管理会把列表挤没。横屏改按接近满屏给高度。
         val isLandscape = screenWidthDp > screenHeightDp
-        val sheetHeight = (screenHeightDp * if (isLandscape) 0.95f else 0.72f).dp
+        // 横屏时按 screenHeightDp 乘比例算出来的高度会超出实际窗口
+        // （系统栏还要占掉一截），底部配置管理被挤出屏幕、列表只剩一行。
+        // 这里横屏直接按父容器实际高度取 96%，竖屏维持原来的 72%。
+        val sheetModifier = if (isLandscape) {
+            Modifier.fillMaxHeight(0.96f)
+        } else {
+            Modifier.height((screenHeightDp * 0.72f).dp)
+        }
         AVBoxBottomSheet(
             onDismissRequest = { showSourceSheet = false },
-            modifier = Modifier.height(sheetHeight),
+            modifier = sheetModifier,
             title = stringResource(R.string.home_subscription_source),
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
             isScrollable = false,
@@ -607,7 +614,7 @@ fun HomePage(
                 hint = stringResource(R.string.home_site_search_hint),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                    .padding(start = 16.dp, end = 16.dp, bottom = if (isLandscape) 8.dp else 12.dp),
                 trailing = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (subscribeOptions.isNotEmpty()) {
@@ -654,7 +661,7 @@ fun HomePage(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
+                    .padding(start = 16.dp, end = 16.dp, bottom = if (isLandscape) 4.dp else 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 CapsuleSegmentedButton(
@@ -762,7 +769,12 @@ fun HomePage(
                 title = null,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 16.dp),
+                    .padding(
+                        start = 16.dp,
+                        end = 16.dp,
+                        top = if (isLandscape) 6.dp else 10.dp,
+                        bottom = if (isLandscape) 8.dp else 16.dp,
+                    ),
             ) {
                 SettingsCard(
                     position = SettingsCardPosition.SINGLE,
