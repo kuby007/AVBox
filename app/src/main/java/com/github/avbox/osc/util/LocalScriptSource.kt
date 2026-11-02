@@ -71,17 +71,12 @@ object LocalScriptSource {
 
     private fun storeFile(dir: String): File = File(dir, STORE_FILE)
 
-    private fun isRemote(api: String?): Boolean =
-        api != null && (api.startsWith("http://") || api.startsWith("https://"))
+    // 远程判定与本地路径换算统一收敛到 HtmlUrl，避免这里与 WebView 加载各判各的
+    private fun isRemote(api: String?): Boolean = HtmlUrl.isRemote(api)
 
     private fun isFileBacked(api: String?): Boolean = !isRemote(api)
 
-    private fun localPathOf(api: String?): String? {
-        if (api == null) return null
-        if (api.startsWith("file://")) return api.substring("file://".length)
-        if (api.startsWith("clan://localhost/")) return api.substring("clan://localhost/".length)
-        return if (api.startsWith("/")) api else null
-    }
+    private fun localPathOf(api: String?): String? = HtmlUrl.localPathOf(api)
 
     private fun extOf(file: File): String {
         val n = file.name.lowercase()
@@ -137,38 +132,20 @@ object LocalScriptSource {
         return o
     }
 
-    /**
-     * 本地 html 的页面地址：走宿主自己的文件服务 http://127.0.0.1:<port>/file/<相对外存路径>
-     * 端口不写死 —— 9978 被占用时 ControlManager 会自动后挪。
-     */
-    private fun fileHomePage(file: File): String {
-        val root = Environment.getExternalStorageDirectory().absolutePath.trimEnd('/')
-        val abs = file.absolutePath
-        val rel = if (abs.startsWith(root)) abs.substring(root.length).trimStart('/') else abs.trimStart('/')
-        return "http://127.0.0.1:" + RemoteServer.serverPort + "/file/" + rel
-    }
+    /** 本地 html 页面地址：统一由 HtmlUrl 生成（端口按运行时实际值，不写死 9978）。 */
+    private fun fileHomePage(file: File): String = HtmlUrl.localPage(file)
 
-    /** html 条目（api 已是 Csp_Nostr）背后的本地文件路径，用于判断文件还在不在 */
-    private fun htmlLocalPath(o: JSONObject): String? {
-        val raw = o.optString("homePage")
-        val marker = "/file/"
-        val idx = raw.indexOf(marker)
-        if (idx < 0) return null
-        val rel = raw.substring(idx + marker.length)
-        return if (rel.startsWith("/")) rel
-        else Environment.getExternalStorageDirectory().absolutePath.trimEnd('/') + "/" + rel
-    }
+    /** html 条目背后的本地文件路径，用于判断文件还在不在 */
+    private fun htmlLocalPath(o: JSONObject): String? =
+        HtmlUrl.localPathOf(o.optString("homePage"))
 
     /** 老数据迁移：type 6 一律换成 type 3 + 内置 Csp_Nostr + 顶层 homePage */
     private fun migrate(o: JSONObject): Boolean {
         val api = o.optString("api")
         var home = o.optString("homePage")
         val isHtmlFile = api.endsWith(".html", true) || api.endsWith(".htm", true)
-        if (home.isBlank() && isHtmlFile) {
-            val p = localPathOf(api)
-            if (p != null) home = fileHomePage(File(p))
-        }
-        if (home.isBlank() && isRemote(api)) home = api
+        if (home.isBlank() && isHtmlFile) home = HtmlUrl.normalize(api).pageUrl
+        if (home.isBlank() && HtmlUrl.isRemote(api)) home = HtmlUrl.normalize(api).pageUrl
         if (home.isBlank()) return false
         o.put("type", 3)
         o.put("api", BuiltinSpiders.HTML_API)
@@ -324,7 +301,8 @@ object LocalScriptSource {
         o.put("name", uniqueName(name.ifBlank { url } + "[url]", taken))
         o.put("type", 3)
         o.put("api", BuiltinSpiders.HTML_API)
-        o.put("homePage", url)
+        // 粘贴的 url 同样过一遍归一化：三斜杠笔误、file://、回环 /file/ 都在这里修好
+        o.put("homePage", HtmlUrl.normalize(url).pageUrl)
         o.put("ext", "")
         o.put("proxy", proxy)
         o.put("searchable", 1)

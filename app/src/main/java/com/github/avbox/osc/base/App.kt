@@ -78,6 +78,8 @@ class App : Application() {
             FileUtils.ensureNoMediaMarker()
             Probe.trace("boot:cleanPlayerCache") { FileUtils.cleanPlayerCache() }
         }, "exo-cache-boot").start()
+        // 预热 WebView：把首次初始化的几百毫秒挪出「点开 html 页面」的关键路径
+        com.github.avbox.osc.ui.WebViewPool.warm(this)
         bootMark("onCreateDone")
     }
 

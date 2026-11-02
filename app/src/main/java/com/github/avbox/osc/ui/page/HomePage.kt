@@ -420,8 +420,8 @@ fun HomePage(
                 }
             }
             else -> {
-            // 横屏且宽度足够时改左右分栏：左侧 Hero，右侧信息流
-            val homeSplitLandscape = screenWidthDp > screenHeightDp && screenWidthDp >= 640
+            // 横屏左右分栏实测效果不佳，撤回为上下堆叠（保留智能列数/高度适配）
+            val homeSplitLandscape = false
             val homeHeroPanelWidth = (screenWidthDp * 0.38f).dp
             if (homeLayout == HomeSettings.HomeLayout.Vertical) {
                 ProvideTmdbPosterLookup(vm) {
@@ -743,9 +743,8 @@ fun HomePage(
                     vm.switchSubscribe(item)
                 }
             }
-            // 横屏左右分栏：左侧搜索+分类+站点列表，右侧配置管理
-            // 竖屏维持自上而下的单列，避免列表被底部配置管理挤没
-            val splitLandscape = isLandscape && screenWidthDp >= 640
+            // 分栏实测效果不佳，统一走自上而下的单列（横屏靠高度与列数适配）
+            val splitLandscape = false
             var sourceKind by remember { mutableStateOf(SiteKind.ALL) }
             val visible = remember(filtered, sourceKind) {
                 filtered.filter { sourceKind == SiteKind.ALL || siteKindOf(it.api) == sourceKind }

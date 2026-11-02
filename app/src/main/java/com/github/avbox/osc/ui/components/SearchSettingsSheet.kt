@@ -115,7 +115,8 @@ fun SearchSettingsSheet(onDismiss: () -> Unit, onSelectionChanged: () -> Unit) {
             )
         },
     ) {
-        val sheetLandscape = cfg.screenWidthDp > cfg.screenHeightDp && cfg.screenWidthDp >= 640
+        // 横屏左右分栏实测效果不佳，统一用单列布局
+        val sheetLandscape = false
         val matchToggle: @Composable () -> Unit = {
                 SettingsGroup(title = null) {
                     SettingsCard(

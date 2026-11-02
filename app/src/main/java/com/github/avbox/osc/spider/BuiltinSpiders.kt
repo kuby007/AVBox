@@ -4,6 +4,7 @@ import android.os.Handler
 import android.os.Looper
 import com.github.avbox.osc.ui.HtmlActivity
 import com.github.avbox.osc.util.AppLog
+import com.github.avbox.osc.util.HtmlUrl
 import com.github.catvod.crawler.Spider
 import org.json.JSONArray
 import org.json.JSONObject
@@ -90,24 +91,10 @@ private class CspNostr(
     }
 
     /**
-     * 页面地址。本地文件服务端口会被占用后自动后挪（9978 → 9979…），
-     * 所以 /file/ 形式的地址一律按【当前实际端口】重建，避免配置写死后失效。
+     * 页面地址统一交给 [HtmlUrl] 归一化：端口漂移、file://、clan://、
+     * 回环 /file/、三斜杠笔误都只在这一处处理，不再各拼各的。
      */
-    private fun resolvePage(): String {
-        val raw = homePage?.trim().orEmpty()
-        if (raw.isEmpty()) return ""
-        val marker = "/file/"
-        val idx = raw.indexOf(marker)
-        if (idx < 0) return raw
-        val path = raw.substring(idx + marker.length)
-        return try {
-            com.github.avbox.osc.server.ControlManager.get().getAddress(true).trimEnd('/') +
-                marker + path
-        } catch (th: Throwable) {
-            AppLog.e("CspNostr", th)
-            raw
-        }
-    }
+    private fun resolvePage(): String = HtmlUrl.normalize(homePage).pageUrl
 
     private fun openPage() {
         Handler(Looper.getMainLooper()).post {

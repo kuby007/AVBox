@@ -20,6 +20,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import com.github.avbox.osc.util.KV
 import com.github.avbox.osc.util.AppLog
+import com.github.avbox.osc.util.HtmlUrl
 import org.json.JSONObject
 import java.io.File
 
@@ -67,6 +68,8 @@ class HtmlActivity : Activity() {
      *  重复执行会让脚本回调两次，Spider 侧拿到第二次的空结果。 */
     private var invoked = false
     private var destroyed = false
+    /** WebViewPool 创建失败时退回自己 new 的 WebView，这种才由本页 destroy */
+    private var ownedWebView = false
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -83,7 +86,10 @@ class HtmlActivity : Activity() {
 
         val root = android.widget.FrameLayout(this)
         root.setBackgroundColor(Color.BLACK)
-        val wv = WebView(this)
+        // 复用进程级 WebView：首次点开才付初始化成本，之后 attach + loadUrl 即可
+        val reused = WebViewPool.attach(this)
+        val wv = reused ?: WebView(this)
+        ownedWebView = reused == null
         webView = wv
         root.addView(
             wv,
@@ -104,6 +110,8 @@ class HtmlActivity : Activity() {
      */
     @SuppressLint("SetJavaScriptEnabled")
     private fun setupWebView(v: WebView, req: Request) {
+        // 页面地址统一由 HtmlUrl 归一化，本地 /file/ 与远程 http 在这里分流
+        val page = HtmlUrl.normalize(req.api)
         v.setLayerType(View.LAYER_TYPE_HARDWARE, null)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             v.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, true)
@@ -122,7 +130,10 @@ class HtmlActivity : Activity() {
         s.builtInZoomControls = false
         s.displayZoomControls = false
         s.textZoom = 100
-        s.cacheMode = WebSettings.LOAD_DEFAULT
+        // 远程页面走缓存优先：LOAD_DEFAULT 每次都回源校验，二次打开明显慢。
+        // 本地 /file/ 页面保持 LOAD_DEFAULT —— 文件改了要立刻生效，不能被缓存挡住。
+        s.cacheMode = if (page.local) WebSettings.LOAD_DEFAULT
+        else WebSettings.LOAD_CACHE_ELSE_NETWORK
         s.allowFileAccess = true
         s.allowContentAccess = true
         s.allowFileAccessFromFileURLs = true
@@ -150,6 +161,9 @@ class HtmlActivity : Activity() {
 
         // 缺了这个 alert/prompt/confirm 全部静默失效，脚本卡在等交互上 → 看起来「卡死」
         v.webChromeClient = WebChromeClient()
+        // 复用实例上可能还挂着上一轮的桥（inner class 持有旧 req），先卸再装
+        @Suppress("DEPRECATION")
+        v.removeJavascriptInterface("FmBridge")
         v.addJavascriptInterface(Bridge(req), "FmBridge")
 
         v.webViewClient = object : WebViewClient() {
@@ -247,29 +261,21 @@ class HtmlActivity : Activity() {
     }
 
     /**
-     * 加载页面。本地文件直接 loadUrl("file://...")，远程直接 loadUrl(url)。
+     * 加载页面：地址一律先经 [HtmlUrl.normalize] 归一化。
      *
-     * 【为什么不再 loadDataWithBaseURL 塞正文】塞进去的页面 baseURI 会失真，
-     * 页面里的相对引用和 fetch 全被打死 —— 表现就是「只出框架、取不到数据」。
-     * 主流做法就是 loadUrl，baseURI 天然正确。
+     * 本地文件（file:// / clan:// / 裸绝对路径 / 回环 /file/）统一换算成宿主文件服务的
+     * http 地址 —— baseURI 正确、页内 fetch/XHR 不被 file:// 的 CORS 拦掉、MIME 也正确；
+     * 远程 http/https 原样交给 WebView，并享受缓存优先。
      */
     private fun load(wv: WebView, req: Request) {
-        val url = req.api
+        val page = HtmlUrl.normalize(req.api)
+        if (page.pageUrl.isEmpty()) {
+            AppLog.i("$TAG: invalid api=${req.api}")
+            if (!req.resident) settle(null)
+            return
+        }
         try {
-            when {
-                url.startsWith("http://") || url.startsWith("https://") -> wv.loadUrl(url)
-                url.startsWith("file://") -> wv.loadUrl(url)
-                url.startsWith("/") -> wv.loadUrl("file://$url")
-                url.startsWith("clan://localhost/") -> {
-                    val p = Environment.getExternalStorageDirectory().absolutePath + "/" +
-                        Uri.decode(url.substring("clan://localhost/".length))
-                    wv.loadUrl("file://$p")
-                }
-                else -> {
-                    AppLog.i("$TAG: invalid api=$url")
-                    if (!req.resident) settle(null)
-                }
-            }
+            wv.loadUrl(page.pageUrl)
         } catch (th: Throwable) {
             AppLog.e(TAG, th)
             if (!req.resident) settle(null)
@@ -315,10 +321,17 @@ class HtmlActivity : Activity() {
         return super.onKeyDown(keyCode, event)
     }
 
-    /** 按主流顺序收掉 WebView，避免渲染线程上未决崩溃 */
+    /**
+     * 承载页结束时只解绑、不销毁：进程级 WebView 留给下一次点开复用。
+     * 只有 WebViewPool 不可用、本页自己 new 的那一个才按原顺序 destroy。
+     */
     private fun releaseWebView() {
         val wv = webView ?: return
         webView = null
+        if (!ownedWebView) {
+            WebViewPool.detach()
+            return
+        }
         try {
             wv.stopLoading()
             @Suppress("DEPRECATION")
@@ -503,13 +516,17 @@ class HtmlActivity : Activity() {
         injectAndInvoke(req)
     }
 
-    private fun readAsset(name: String): String? =
-        try {
-            assets.open(name).bufferedReader().use { it.readText() }
+    private fun readAsset(name: String): String? {
+        fmApiCache?.let { return it }
+        return try {
+            val text = assets.open(name).bufferedReader().use { it.readText() }
+            fmApiCache = text
+            text
         } catch (th: Throwable) {
             AppLog.e(TAG, th)
             null
         }
+    }
 
     private inner class Bridge(private val req: Request) {
 
@@ -580,6 +597,9 @@ class HtmlActivity : Activity() {
         private const val TAG = "HtmlActivity"
         private const val AUTO_CLOSE_MS = 30_000L
         private const val IDLE_CLOSE_MS = 8_000L
+
+        @Volatile
+        private var fmApiCache: String? = null
 
         @Volatile
         var pending: Request? = null
