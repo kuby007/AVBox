@@ -57,6 +57,7 @@ import com.github.avbox.osc.ui.siteKindOf
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 
 @Composable
 fun SearchSettingsSheet(onDismiss: () -> Unit, onSelectionChanged: () -> Unit) {

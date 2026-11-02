@@ -420,6 +420,9 @@ fun HomePage(
                 }
             }
             else -> {
+            // 横屏且宽度足够时改左右分栏：左侧 Hero，右侧信息流
+            val homeSplitLandscape = screenWidthDp > screenHeightDp && screenWidthDp >= 640
+            val homeHeroPanelWidth = (screenWidthDp * 0.38f).dp
             if (homeLayout == HomeSettings.HomeLayout.Vertical) {
                 ProvideTmdbPosterLookup(vm) {
                     HomeGridLayout(
