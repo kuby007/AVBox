@@ -73,6 +73,10 @@ class HtmlActivity : Activity() {
     private var loadTimeoutRecoveries = 0
     private var loadTimeoutRunnable: Runnable? = null
     private var autoCloseRunnable: Runnable? = null
+    /** WebHome 异步请求线程池：JS 线程只发 id，网络在后台跑完再回调 resolve。 */
+    private val asyncPool = java.util.concurrent.Executors.newCachedThreadPool()
+    /** 超过阈值的大响应分片存放，JS 侧用 resultLength/resultChunk 拉回。 */
+    private val asyncChunks = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -516,6 +520,8 @@ class HtmlActivity : Activity() {
             wv.destroy()
         } catch (ignored: Throwable) {
         }
+        asyncChunks.clear()
+        try { asyncPool.shutdownNow() } catch (ignored: Throwable) {}
     }
 
     private fun finishSafely() {
@@ -764,6 +770,135 @@ class HtmlActivity : Activity() {
             }
         }
 
+        /** ---------- 主流 WebHome 异步桥（对齐 webhtv HomeWebBridge） ---------- */
+
+        /**
+         * JS 只传 id 与参数，立即返回；OkHttp 在后台线程执行，完成后 evaluateJavascript
+         * 回调 window.fongmiNative.resolve(id, payload)。旧实现把同步 req 包一层
+         * Promise.resolve，页面每个 await 都会阻塞 WebView JS 线程，多请求串行 →
+         * 「在线 html 比 jar 慢、有些加载不出来」的根因。
+         */
+        @JavascriptInterface
+        fun requestAsync(
+            id: String?, url: String?, headers: String?,
+            method: String?, body: String?, responseType: String?,
+        ) {
+            val rid = id ?: return
+            if (url.isNullOrEmpty()) {
+                resolveAsync(rid, errorPayload("", "empty url"))
+                return
+            }
+            asyncPool.execute {
+                val payload = try {
+                    performRequest(url, headers, method, body, responseType)
+                } catch (th: Throwable) {
+                    errorPayload(url, th.message ?: "request failed")
+                }
+                mainHandler.post {
+                    if (!destroyed) resolveAsync(rid, payload)
+                }
+            }
+        }
+
+        private fun performRequest(
+            url: String, headers: String?, method: String?,
+            body: String?, responseType: String?,
+        ): String {
+            val client = com.github.catvod.net.OkHttp.client()
+            val builder = okhttp3.Request.Builder().url(url)
+            if (!headers.isNullOrEmpty()) {
+                val h = JSONObject(headers)
+                val it = h.keys()
+                while (it.hasNext()) {
+                    val k = it.next()
+                    builder.header(k, h.optString(k))
+                }
+            }
+            // credentials: include 时把 CookieManager 里该域的 Cookie 补上
+            val m = (method ?: "GET").uppercase()
+            val payload = if (m == "GET" || m == "HEAD" || body.isNullOrEmpty()) null
+            else okhttp3.RequestBody.create(null, body)
+            builder.method(m, payload)
+            val resp = client.newCall(builder.build()).execute()
+            val code = resp.code
+            val finalUrl = try { resp.request.url.toString() } catch (th: Throwable) { url }
+            val hdrs = JSONObject()
+            for (name in resp.headers.names()) {
+                hdrs.put(name, resp.headers.values(name).joinToString(", "))
+            }
+            val cookies = org.json.JSONArray()
+            val setCookies = resp.headers.values("Set-Cookie")
+            setCookies.forEach { cookies.put(it) }
+            if (setCookies.isNotEmpty()) {
+                mainHandler.post {
+                    try {
+                        val cm = CookieManager.getInstance()
+                        setCookies.forEach { cm.setCookie(url, it) }
+                        cm.flush()
+                    } catch (ignored: Throwable) {}
+                }
+            }
+            val raw = resp.body?.bytes()
+            resp.close()
+            val text = if ("base64".equals(responseType, ignoreCase = true)) {
+                android.util.Base64.encodeToString(raw ?: ByteArray(0), android.util.Base64.NO_WRAP)
+            } else {
+                String(raw ?: ByteArray(0), Charsets.UTF_8)
+            }
+            return JSONObject()
+                .put("ok", code in 200..299)
+                .put("status", code)
+                .put("url", finalUrl)
+                .put("headers", hdrs)
+                .put("cookies", cookies)
+                .put("body", text)
+                .put("error", "")
+                .toString()
+        }
+
+        private fun errorPayload(url: String, msg: String): String = JSONObject()
+            .put("ok", false)
+            .put("status", 500)
+            .put("url", url)
+            .put("headers", JSONObject())
+            .put("cookies", org.json.JSONArray())
+            .put("body", "")
+            .put("error", msg)
+            .toString()
+
+        /** 超过 12000 字符只回一个结果 id，JS 侧分块拉取，避免 evaluateJavascript 截断。 */
+        private fun resolveAsync(rid: String, payload: String) {
+            var p = payload
+            if (p.length > ASYNC_INLINE_LIMIT) {
+                val key = rid + "_" + System.nanoTime()
+                asyncChunks[key] = p
+                p = JSONObject().put("__fmResultId", key).toString()
+            }
+            val script = "window.fongmiNative&&window.fongmiNative.resolve(" +
+                (JSONObject.quote(rid) ?: "\"\"") + "," + p + ")"
+            try {
+                @Suppress("DEPRECATION")
+                webView?.evaluateJavascript(script, null)
+            } catch (th: Throwable) {
+                AppLog.e(TAG, th)
+            }
+        }
+
+        @JavascriptInterface
+        fun resultLength(id: String?): Int = asyncChunks[id]?.length ?: 0
+
+        @JavascriptInterface
+        fun resultChunk(id: String?, start: Int): String {
+            val s = asyncChunks[id] ?: return ""
+            if (start < 0 || start >= s.length) return ""
+            return s.substring(start, minOf(start + ASYNC_CHUNK_SIZE, s.length))
+        }
+
+        @JavascriptInterface
+        fun clearResult(id: String?) {
+            if (id != null) asyncChunks.remove(id)
+        }
+
         @JavascriptInterface
         fun getVar(key: String?): String =
             try {
@@ -936,6 +1071,8 @@ class HtmlActivity : Activity() {
         private const val IDLE_CLOSE_MS = 8_000L
         private const val LOAD_TIMEOUT_MS = 15_000L
         private const val MAIN_FRAME_TIMEOUT_MS = 15_000L
+        private const val ASYNC_INLINE_LIMIT = 12_000
+        private const val ASYNC_CHUNK_SIZE = 60_000
         private const val DEFAULT_UA =
             "Mozilla/5.0 (Linux; Android 12; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
 

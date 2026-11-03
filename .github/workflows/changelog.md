@@ -1,3 +1,9 @@
+## 1.3.4.10-xbox
+- 远程 html 对齐 webhtv 的异步 WebHome 桥：fm.req(url, options) / fm.request 改为 Native 后台 OkHttp + fongmiNative.resolve 回调，不再同步阻塞 WebView JS 线程；多请求可并发，长响应自动分片还原
+- fm 桥补结构化响应契约（ok/status/url/headers/cookies/body/error、responseType text/json/base64、timeout、headers.get、text()/json()），老 spider 的单参同步 fm.req 行为不变
+- py 弹窗：hidden API 放行提前到 Application.onCreate 最早并全量放行，附反射探测日志；PythonLoader 幂等复用同一兼容层
+- 包名保持不变（applicationId = com.github.xbox.osc）
+
 ## 1.3.4.9-xbox
 - 远程 html：主文档开头内联注入宿主 SDK（对齐 webhtv document-start），页面脚本运行前 window.fm 已就位；DOM 就绪后派发 fmsdk 事件，不再卡在「准备加载…」
 - fm 桥升级到主流 WebHome 契约：fm.req(url, options) / fm.request 返回 Promise 结构化响应，补 fm.cache / fm.res / fm.back / fm.reload / fm.play / fm.vod / fm.site / fm.config / fm.device / fm.ctrl / fm.ui 等；老 spider 的同步 fm.req(url) 与 fm.done 保持不变

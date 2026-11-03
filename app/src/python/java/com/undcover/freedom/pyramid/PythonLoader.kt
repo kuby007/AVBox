@@ -118,57 +118,11 @@ class PythonLoader {
      * hidden API 反射被拒会让它们直接 return「已取消本次弹窗」—— 弹窗根本没被创建。
      * 这里只放行必要前缀，平台不提供该开关时静默跳过，不影响 Python 环境其它功能。
      */
+    /** 统一委托给宿主级兼容层（Application.onCreate 最早已执行，这里幂等兜底）。 */
     private fun allowHiddenApis() {
-        try {
-            val vm = Class.forName("dalvik.system.VMRuntime")
-            val getRuntime = vm.getDeclaredMethod("getRuntime")
-            getRuntime.isAccessible = true
-            val runtime = getRuntime.invoke(null) ?: return
-            val setExemptions = vm.getDeclaredMethod(
-                "setHiddenApiExemptions", Array<String>::class.java,
-            )
-            setExemptions.isAccessible = true
-            val prefixes = arrayOf(
-                "Landroid/app/ActivityThread;",
-                "Landroid/app/ActivityThread\$",
-                "Landroid/app/Activity;",
-                "Landroid/app/Application;",
-                "Landroid/app/ContextImpl;",
-                "Landroid/app/LoadedApk;",
-                "Landroid/app/Instrumentation;",
-                "Landroid/content/ContextWrapper;",
-                "Landroid/view/View;",
-                "Landroid/view/Window;",
-                "Ldalvik/system/VMRuntime;",
-                "Ljava/lang/Class;",
-                "Ljava/lang/reflect/Method;",
-                "Ljava/lang/reflect/Field;",
-            )
-            // 作为单个 String[] 参数传入，不能被 vararg 展开
-            setExemptions.invoke(runtime, prefixes as Any)
-            AppLog.i("PythonLoader: hidden api exemption installed (${prefixes.size})")
-        } catch (th: Throwable) {
-            AppLog.i("PythonLoader: hidden api exemption unavailable: ${th.message}")
-            // 备用：部分 ROM 挡住 getDeclaredMethod，但 declaredMethods 仍可枚举
-            try {
-                val vm = Class.forName("dalvik.system.VMRuntime")
-                val runtime = vm.getDeclaredMethod("getRuntime").apply { isAccessible = true }
-                    .invoke(null) ?: return
-                val m = vm.declaredMethods.firstOrNull { it.name == "setHiddenApiExemptions" }
-                    ?: return
-                m.isAccessible = true
-                m.invoke(runtime, arrayOf(
-                    "Landroid/app/ActivityThread;",
-                    "Landroid/app/ActivityThread\$",
-                    "Landroid/app/Activity;",
-                    "Landroid/app/Application;",
-                    "Ldalvik/system/VMRuntime;",
-                ) as Any)
-                AppLog.i("PythonLoader: hidden api exemption installed (fallback)")
-            } catch (th2: Throwable) {
-                AppLog.i("PythonLoader: hidden api exemption fallback failed: ${th2.message}")
-            }
-        }
+        com.github.avbox.osc.util.HiddenApiCompat.apply()
+        AppLog.i("PythonLoader: hidden api exemption verified=" +
+            com.github.avbox.osc.util.HiddenApiCompat.verified)
     }
 
     private fun setSdk(context: Context) {

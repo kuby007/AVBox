@@ -5,7 +5,9 @@
  *  1) TVBox html spider 老契约：fm.req(url) 同步返回正文字符串、fm.done(结果) 回传。
  *     首页/分类/详情这类脚本仍走这条路，行为一字不改。
  *  2) 主流 WebHome 契约（对齐 webhtv 的 Native SDK）：SDK 就绪后派发 fmsdk 事件，
- *     fm.req(url, options) / fm.request() 返回 Promise 结构化响应，
+ *     fm.req(url, options) / fm.request() 返回 Promise 结构化响应（ok/status/url/
+ *     headers/cookies/body/error，responseType 支持 text/json/base64）；
+ *     走 fongmiNative 异步桥，Native 后台 OkHttp 不阻塞 JS 线程，大响应自动分片。
  *     fm.cache / fm.res / fm.play / fm.vod / fm.back / fm.reload / fm.site 等就位。
  *
  * 关键点：宿主在【主文档开头内联注入本文件】，页面任何脚本运行前 window.fm 已存在；
@@ -19,6 +21,126 @@
     window.fm = fm;
   }
   var _done = false;
+
+  /* ---- 异步桥（对齐 webhtv HomeWebBridge）：JS 发 id → Native 后台 OkHttp → 回调 resolve ---- */
+  var _pending = {};
+  var _seq = 0;
+  var CHUNK = 60000;
+  var INLINE_LIMIT_HINT = 12000;
+
+  function jstr(s) {
+    return JSON.stringify(String(s === undefined || s === null ? '' : s));
+  }
+
+  /** 大响应分片还原：Native 超过阈值只回 {__fmResultId}，这里按块拉回并拼成字符串 */
+  function readChunks(rid) {
+    var b = B();
+    var len = 0;
+    try { len = b.resultLength(rid) || 0; } catch (e) { return ''; }
+    var out = [];
+    for (var s = 0; s < len; s += CHUNK) {
+      var part = '';
+      try { part = b.resultChunk(rid, s) || ''; } catch (e) {}
+      out.push(part);
+      if (!part) break;
+    }
+    try { b.clearResult(rid); } catch (e) {}
+    return out.join('');
+  }
+
+  /** Native 返回的结构化 payload → WebHome 响应对象（文档 17.1 契约） */
+  function toResponse(payload, url, opt) {
+    var p = (payload && typeof payload === 'object') ? payload : {};
+    if (p.__fmResultId) {
+      var raw = readChunks(p.__fmResultId);
+      try { p = JSON.parse(raw); } catch (e) { p = {}; }
+    }
+    var status = Number(p.status || 0);
+    var ok = typeof p.ok === 'boolean' ? p.ok : (status >= 200 && status < 300);
+    var body = p.body === undefined ? '' : p.body;
+    var type = String((opt && opt.responseType) || 'text').toLowerCase();
+    if (type === 'json' && typeof body === 'string') {
+      try { body = JSON.parse(body); } catch (e) {}
+    }
+    var hdrs = (p.headers && typeof p.headers === 'object') ? p.headers : {};
+    var cookies = (p.cookies && p.cookies.length) ? p.cookies : [];
+    var r = {
+      ok: ok,
+      status: status,
+      url: p.url || url || '',
+      headers: hdrs,
+      cookies: cookies,
+      body: body,
+      content: typeof body === 'string' ? body : JSON.stringify(body),
+      data: body,
+      error: p.error || '',
+      text: function () {
+        return Promise.resolve(typeof body === 'string' ? body : JSON.stringify(body));
+      },
+      json: function () {
+        try {
+          return Promise.resolve(typeof body === 'string' ? JSON.parse(body) : body);
+        } catch (e) { return Promise.reject(e); }
+      },
+      clone: function () { return toResponse(p, url, opt); }
+    };
+    r.headers.get = function (k) {
+      var v = hdrs[k];
+      if (v === undefined) {
+        var lk = String(k).toLowerCase();
+        for (var n in hdrs) if (n.toLowerCase() === lk) { v = hdrs[n]; break; }
+      }
+      return v === undefined ? null : (Array.isArray(v) ? v.join(', ') : String(v));
+    };
+    return r;
+  }
+
+  window.fongmiNative = window.fongmiNative || {
+    resolve: function (id, payload) {
+      var p = _pending[id];
+      if (!p) return;
+      delete _pending[id];
+      try { p.resolve(toResponse(payload, p.url, p.opt)); }
+      catch (e) { try { p.reject(e); } catch (e2) {} }
+    },
+    reject: function (id, err) {
+      var p = _pending[id];
+      if (!p) return;
+      delete _pending[id];
+      p.reject(new Error(String(err || 'request failed')));
+    }
+  };
+
+  /** 真异步：不阻塞 WebView JS 线程，多个请求可并发（旧同步 req 会把整个页面卡住） */
+  function asyncRequest(url, opt) {
+    opt = opt || {};
+    return new Promise(function (resolve, reject) {
+      var id = 'fmreq_' + (++_seq) + '_' + Date.now();
+      var secs = Number(opt.timeout || 30);
+      if (!(secs > 0)) secs = 30;
+      var timer = setTimeout(function () {
+        if (!_pending[id]) return;
+        delete _pending[id];
+        resolve(toResponse({ ok: false, status: 0, body: '', error: 'timeout' }, url, opt));
+      }, secs * 1000 + 2000);
+      _pending[id] = {
+        url: String(url), opt: opt,
+        resolve: function (v) { clearTimeout(timer); resolve(v); },
+        reject: function (e) { clearTimeout(timer); reject(e); }
+      };
+      var headers = '';
+      try { headers = JSON.stringify(opt.headers || {}); } catch (e) {}
+      var type = String(opt.responseType || 'text');
+      try {
+        B().requestAsync(id, String(url), headers,
+          String(opt.method || 'GET').toUpperCase(), str(opt.body || ''), type);
+      } catch (e) {
+        clearTimeout(timer);
+        delete _pending[id];
+        resolve(toResponse({ ok: false, status: 0, body: '', error: String(e) }, url, opt));
+      }
+    });
+  }
 
   function safe(fn, def) {
     try { return fn(); } catch (e) { return def; }
@@ -66,35 +188,25 @@
     return safe(function () { return B().ext(); }, '');
   };
 
-  /** 同步请求（老契约）；传了 options 时切到主流 Promise 契约 */
+  /** 老 spider 契约：单参同步返回正文字符串（不能改成异步，html spider 依赖它）。
+   *  主流 WebHome 契约：传了 options（或走 fm.request）→ 真异步 Promise 结构化响应。 */
   fm.req = function (url, opt) {
-    opt = opt || {};
-    var headers = '';
-    try { headers = JSON.stringify(opt.headers || {}); } catch (e) {}
-    var text = '';
-    var failed = false;
-    try {
-      text = B().req(url, headers, opt.method || 'GET', opt.body || '');
-    } catch (e) {
-      failed = true;
-      fm.log('fm.req failed: ' + e);
+    var hasOptions = arguments.length >= 2 && opt && typeof opt === 'object';
+    if (!hasOptions) {
+      var headers = '';
+      var text = '';
+      try { text = B().req(url, headers, 'GET', ''); } catch (e) {
+        fm.log('fm.req failed: ' + e);
+      }
+      return text || '';
     }
-    if (arguments.length >= 2 && opt && typeof opt === 'object') {
-      var r = makeResponse(text || '', !failed && (text || '') !== '', 0, url, failed ? 'request failed' : '');
-      if (r.status === 0) r.status = r.ok ? 200 : 0;
-      return Promise.resolve(r);
-    }
-    return text || '';
+    return asyncRequest(url, opt);
   };
 
   /** 总是返回 Promise 的结构化请求（主流 WebHome 显式通道） */
   fm.request = function (url, opt) {
-    opt = opt || {};
-    try {
-      return Promise.resolve(fm.req(url, opt && typeof opt === 'object' ? opt : {}));
-    } catch (e) {
-      return Promise.resolve(makeResponse('', false, 0, url, String(e)));
-    }
+    try { return asyncRequest(url, opt && typeof opt === 'object' ? opt : {}); }
+    catch (e) { return Promise.resolve(toResponse({ ok: false, status: 0, body: '', error: String(e) }, url, opt)); }
   };
 
   // 老契约的 get / post 必须同步返回正文，不能经过带 options 的 fm.req
@@ -182,13 +294,13 @@
 
   /** 站点 / 配置 / 设备信息：主流页面据此判断是否在 App 内、取当前站点 */
   fm.site = function () {
-    return parse(safe(function () { return B().siteInfo(); }, '{}'), {});
+    return Promise.resolve(parse(safe(function () { return B().siteInfo(); }, '{}'), {}));
   };
   fm.config = function () {
-    return parse(safe(function () { return B().configInfo(); }, '{}'), {});
+    return Promise.resolve(parse(safe(function () { return B().configInfo(); }, '{}'), {}));
   };
   fm.device = function () {
-    return parse(safe(function () { return B().deviceInfo(); }, '{}'), {});
+    return Promise.resolve(parse(safe(function () { return B().deviceInfo(); }, '{}'), {}));
   };
 
   /** 播放直链 / 打开站点影片 / 临时多集 */
@@ -258,13 +370,20 @@
   };
 
   fm.pan = {
-    check: function () { return Promise.resolve({}); },
-    play: function () { return Promise.resolve({}); }
+    check: function (items) {
+      return Promise.resolve({ supported: true, items: asArray(items), results: [] });
+    },
+    play: function (opt) {
+      opt = obj(opt);
+      return fm.play(opt.url, opt.title || '', {
+        pic: opt.pic || '', wallPic: opt.wallPic || '', headers: opt.headers || {}
+      });
+    }
   };
-  fm.check = function () { return Promise.resolve({}); };
+  fm.check = function (items) { return fm.pan.check(items); };
 
   fm.extInfo = function () {
-    return parse(safe(function () { return B().extInfo(); }, '{}'), {});
+    return Promise.resolve(parse(safe(function () { return B().extInfo(); }, '{}'), {}));
   };
   fm.ext = Object.assign(function () {
     return safe(function () { return B().ext(); }, '');
@@ -302,6 +421,115 @@
     setTimeout(function () { window.__fmSdkBoot(); }, 0);
   }
   window.addEventListener('load', function () { window.__fmSdkBoot(); });
+
+  /* ---------------- 对齐 webhtv devkit 的兼容层 ---------------- */
+
+  function asArray(v) {
+    return Object.prototype.toString.call(v) === '[object Array]' ? v : [];
+  }
+
+  /** 原生检测：webhtv 页面用 window.fongmiBridge 判断是否在 App 内。
+   *  我们宿主注入的 JS 接口名是 FmBridge，这里补一个同名门面，避免页面
+   *  误判为浏览器 → 走 fetch fallback → CORS 失败（「资源解析服务请求失败」）。 */
+  try {
+    var _b = B();
+    if (_b) {
+      var fb = window.fongmiBridge || {};
+      ['requestAsync', 'resultLength', 'resultChunk', 'clearResult', 'req', 'log',
+       'cacheGet', 'cacheSet', 'cacheDel', 'cacheClear', 'gatewayBase', 'siteInfo',
+       'configInfo', 'deviceInfo', 'extInfo', 'back', 'reload', 'toast', 'chrome',
+       'ctrl', 'open', 'done', 'siteKey', 'ext', 'getVar', 'setVar'].forEach(function (n) {
+        if (typeof _b[n] === 'function' && typeof fb[n] !== 'function') {
+          fb[n] = function () { return _b[n].apply(_b, arguments); };
+        }
+      });
+      /** 通用 RPC 降级：webhtv 扩展走 invoke(id, method, payload)，这里把已知
+       *  method 映射到宿主能力并回吐结果；未知 method 返回安全空结构而不是抛错。 */
+      fb.invoke = function (id, method, payload) {
+        var data = {};
+        try { data = JSON.parse(payload || '{}'); } catch (e) {}
+        var out = {};
+        try {
+          if (method === 'net.request' || method === 'request') {
+            fm.request(data.url, data).then(function (r) {
+              fb.inlineResult && fb.inlineResult(id, JSON.stringify(r));
+            });
+            return;
+          } else if (method === 'cache.get') out = { value: B().cacheGet(data.key, data.rule) };
+          else if (method === 'cache.set') { B().cacheSet(data.key, data.value, data.rule); out = {}; }
+          else if (method === 'site.info') out = parse(safe(function () { return B().siteInfo(); }, '{}'), {});
+          else if (method === 'config.info') out = parse(safe(function () { return B().configInfo(); }, '{}'), {});
+          else if (method === 'navigation.back') { B().back(); out = {}; }
+          else if (method === 'app.search') { B().open('search', JSON.stringify(data)); out = {}; }
+          else if (method === 'player.playUrl') { B().open('play', JSON.stringify(data)); out = {}; }
+          else if (method === 'player.playVod') { B().open('vod', JSON.stringify(data)); out = {}; }
+        } catch (e) { out = { error: String(e) }; }
+        if (typeof fb.inlineResult === 'function') {
+          try { fb.inlineResult(id, JSON.stringify(out)); } catch (e) {}
+        }
+      };
+      fb.inlineResult = function (id, payload) {
+        try { window.fongmiNative && window.fongmiNative.resolve(id, JSON.parse(payload)); }
+        catch (e) {}
+      };
+      window.fongmiBridge = fb;
+    }
+  } catch (e) {}
+
+  /** webhtv devkit 的 GM_* 别名：页面用到时不会 ReferenceError 中断初始化 */
+  window.GM_getValue = function (k, def) {
+    return fm.cache.get(k, 'gm').then(function (v) { return (v === '' || v == null) ? def : v; });
+  };
+  window.GM_setValue = function (k, v) { return fm.cache.set(k, String(v), 'gm'); };
+  window.GM_deleteValue = function (k) { return fm.cache.del(k, 'gm'); };
+  window.GM_listValues = function () { return Promise.resolve([]); };
+  window.GM_log = function (m) { fm.log(m); };
+  window.GM_addStyle = function (css) {
+    try {
+      var s = document.createElement('style');
+      s.textContent = String(css || '');
+      (document.head || document.documentElement).appendChild(s);
+    } catch (e) {}
+  };
+  window.GM_xmlhttpRequest = function (details) {
+    details = details || {};
+    var p = fm.request(details.url, details);
+    if (p && typeof p.then === 'function') {
+      p.then(function (r) { if (typeof details.onload === 'function') details.onload(r); })
+       .catch(function (e) { if (typeof details.onerror === 'function') details.onerror(e); });
+    }
+    return { abort: function () {} };
+  };
+
+  /** webhtv 自带 WebHome 页用 hasNative() 检测这两个函数；缺失会误判为浏览器，
+   *  进而放弃 fm.req 走 CORS 受限的原生 fetch。这里补安全的 Promise 降级（宿主
+   *  数据由页面自身 API + fm.req 获取，原生分类数据为空时不让页面崩）。 */
+  fm.vodHome = function (arg) {
+    return Promise.resolve(safe(function () {
+      B().open('vodHome', JSON.stringify(obj(arg)));
+      return { list: [], categories: [], class: [], filters: {}, page: 1, pagecount: 1 };
+    }, { list: [], categories: [], class: [], filters: {} }));
+  };
+  fm.vodCategory = function (tid, page, arg) {
+    return Promise.resolve(safe(function () {
+      B().open('vodCategory', JSON.stringify({ tid: str(tid), page: page, arg: obj(arg) }));
+      return { list: [], page: page || 1, pagecount: 1, limit: 0, total: 0 };
+    }, { list: [], page: 1, pagecount: 1 }));
+  };
+  fm.openDetail = function (arg) {
+    return Promise.resolve(safe(function () {
+      B().open('openDetail', JSON.stringify(obj(arg)));
+      return {};
+    }, {}));
+  };
+
+  window.fongmi = window.fongmi || {};
+  window.fongmi.pan = { play: fm.pan.play, check: fm.pan.check };
+  window.fongmi.ext = { info: fm.ext.info, log: fm.ext.log, toast: fm.ext.toast };
+  window.fongmi.device = { info: fm.device };
+  window.fongmi.vodHome = fm.vodHome;
+  window.fongmi.vodCategory = fm.vodCategory;
+  window.fongmi.openDetail = fm.openDetail;
 
   window.fm = fm;
 })();

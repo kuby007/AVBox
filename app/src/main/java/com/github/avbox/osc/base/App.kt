@@ -20,6 +20,7 @@ import com.github.avbox.osc.util.EpgUtil
 import com.github.avbox.osc.util.KVKeys
 import com.github.avbox.osc.util.KV
 import com.github.avbox.osc.util.AppLog
+import com.github.avbox.osc.util.HiddenApiCompat
 import com.github.avbox.osc.util.LanguageManager
 import com.github.avbox.osc.util.Probe
 import com.github.avbox.osc.util.VodImages
@@ -46,6 +47,8 @@ class App : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // 必须早于任何 py / js 环境启动：hidden API 反射放行只对之后加载的类生效
+        HiddenApiCompat.apply()
         bootLastMs = SystemClock.elapsedRealtime()
         installStrictMode()
         bootMark("installStrictMode")
