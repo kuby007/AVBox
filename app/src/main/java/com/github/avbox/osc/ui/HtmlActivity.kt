@@ -18,6 +18,7 @@ import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.WebResourceResponse
 import com.github.avbox.osc.util.KV
 import com.github.avbox.osc.util.AppLog
 import com.github.avbox.osc.util.HtmlUrl
@@ -25,7 +26,7 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * HTML 脚本（type 6）的全屏承载页。
+ * HTML 站点的全屏承载页（type 3 内置 Csp）。
  *
  * 【定位】html 是【被打开的应用】，不是【数据源】—— 与 appmenu / WvWv 的思路一致：
  * 分类与宫格由宿主造（一张「启动脚本」卡），页面本身不回传任何数据。
@@ -68,6 +69,10 @@ class HtmlActivity : Activity() {
      *  重复执行会让脚本回调两次，Spider 侧拿到第二次的空结果。 */
     private var invoked = false
     private var destroyed = false
+    private var loadToken = 0
+    private var loadTimeoutRecoveries = 0
+    private var loadTimeoutRunnable: Runnable? = null
+    private var autoCloseRunnable: Runnable? = null
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -183,23 +188,32 @@ class HtmlActivity : Activity() {
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
+                cancelLoadTimeout()
                 // 常驻模式：只保证 fm 桥在页面上，不调用任何脚本函数
                 if (req.resident) injectApiOnly() else injectAndInvoke(req)
             }
 
             /**
-             * 不接管任何子资源。
+             * 只接管 http/https 【主文档】，由宿主共享 OkHttp 代取（对齐 webhtv 的
+             * WebHomeRawAdapter）。子资源一律交回 WebView 原生栈——逐资源同步请求会
+             * 把 WebView 的 IO 线程打满，那是旧实现卡死的根因，不能重蹈。
              *
-             * 以前在站点配了代理时，对每个子资源同步 OkHttp.execute()：
-             * 串行、无超时、阻塞在 WebView 的 IO 线程上，页面资源一多就假死，
-             * 这是「在线 html 比浏览器慢 / 打开后卡死」的头号原因。
-             * WebView 与 Chrome 同内核同网络栈，全部交回原生加载才是浏览器速度；
-             * 真需要走代理的脚本用 FmBridge.req（宿主网络栈，已有）。
+             * 代取的收益不在「更快」，在「更稳」：共享连接池、明确超时、主帧强制
+             * text/html、剥掉 CSP / X-Frame-Options / COEP 等会阻断渲染的响应头，
+             * 失败给可见的 502 页而不是白屏干等。
              */
             override fun shouldInterceptRequest(
                 view: WebView?,
                 request: android.webkit.WebResourceRequest?,
-            ): android.webkit.WebResourceResponse? = null
+            ): WebResourceResponse? {
+                val r = request ?: return null
+                if (!r.isForMainFrame) return null
+                val url = r.url?.toString() ?: return null
+                if (!url.startsWith("http://") && !url.startsWith("https://")) return null
+                // 本地页面走宿主自己的文件服务，MIME 已正确，不代取
+                if (url.contains("127.0.0.1") || url.contains("localhost") || url.contains("[::1]")) return null
+                return fetchMainFrame(url, r.requestHeaders)
+            }
 
             // 在线 url 打不开（DNS/404/证书…）时立刻交付，别让 Spider 干等 30 秒超时
             override fun onReceivedError(
@@ -224,12 +238,30 @@ class HtmlActivity : Activity() {
                 AppLog.i("$TAG: load error ${error?.errorCode} ${error?.description}")
                 if (!req.resident) settle(null) else showLoadError(error?.description?.toString())
             }
+
+            /** 渲染进程崩溃时自愈：重建 WebView 后重载，避免白屏停在死页面上。 */
+            @Suppress("NewApi")
+            override fun onRenderProcessGone(
+                view: WebView?,
+                detail: android.webkit.RenderProcessGoneDetail?,
+            ): Boolean {
+                AppLog.i("$TAG: render process gone, recreate")
+                if (loadTimeoutRecoveries++ <= 1) {
+                    mainHandler.post { recreateWebView() }
+                } else {
+                    showLoadError("渲染进程异常")
+                }
+                return true
+            }
         }
 
         // 脚本不回调时兜底关闭，避免页面常驻挡住操作
         // （常驻模式例外：页面本来就该常驻，等用户按返回，不能自己关）
         if (!req.resident) {
-            mainHandler.postDelayed({ settle(null) }, AUTO_CLOSE_MS)
+            autoCloseRunnable?.let { mainHandler.removeCallbacks(it) }
+            val r = Runnable { settle(null) }
+            autoCloseRunnable = r
+            mainHandler.postDelayed(r, AUTO_CLOSE_MS)
         }
     }
 
@@ -248,10 +280,125 @@ class HtmlActivity : Activity() {
             return
         }
         try {
+            scheduleLoadTimeout()
             wv.loadUrl(page.pageUrl)
         } catch (th: Throwable) {
             AppLog.e(TAG, th)
+            cancelLoadTimeout()
             if (!req.resident) settle(null)
+        }
+    }
+
+    /* ---------------- 主文档代取 / 超时自愈（webhtv 对齐） ---------------- */
+
+    private fun scheduleLoadTimeout() {
+        loadTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+        val token = ++loadToken
+        val r = Runnable { handleLoadTimeout(token) }
+        loadTimeoutRunnable = r
+        mainHandler.postDelayed(r, LOAD_TIMEOUT_MS)
+    }
+
+    private fun cancelLoadTimeout() {
+        loadTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+        loadTimeoutRunnable = null
+    }
+
+    private fun handleLoadTimeout(token: Int) {
+        if (token != loadToken || destroyed || isFinishing || isDestroyed) return
+        if (loadTimeoutRecoveries++ > 0) {
+            showLoadError("加载超时")
+            return
+        }
+        AppLog.i("$TAG: load timeout, recreate WebView")
+        recreateWebView()
+    }
+
+    /** 超时或渲染进程崩溃后重建 WebView：销毁旧实例 → 新建 → 重新装配 → 重载。 */
+    private fun recreateWebView() {
+        val old = webView ?: return
+        val root = old.parent as? ViewGroup ?: return
+        val index = root.indexOfChild(old)
+        val lp = old.layoutParams
+        try {
+            old.stopLoading()
+            @Suppress("DEPRECATION")
+            old.removeJavascriptInterface("FmBridge")
+            old.onPause()
+            root.removeView(old)
+            old.loadUrl("about:blank")
+            old.clearHistory()
+            old.removeAllViews()
+            old.destroy()
+        } catch (ignored: Throwable) {
+        }
+        webView = null
+        val req = currentReq ?: pendingRequest
+        if (req == null || destroyed || isFinishing || isDestroyed) return
+        val wv = WebView(this)
+        webView = wv
+        root.addView(wv, maxOf(0, index), lp)
+        invoked = false
+        setupWebView(wv, req)
+        load(wv, req)
+    }
+
+    /**
+     * 主文档代取。请求头过滤掉逐跳字段；响应头剥掉会阻断渲染的头；
+     * 主帧强制 text/html，Set-Cookie 交回 CookieManager 保住登录态。
+     */
+    private fun fetchMainFrame(url: String, webHeaders: Map<String, String>?): WebResourceResponse {
+        var resp: okhttp3.Response? = null
+        return try {
+            val builder = okhttp3.Request.Builder().url(url)
+            var hasUa = false
+            webHeaders?.forEach { (k, v) ->
+                val lk = k.lowercase()
+                if (lk in BLOCK_REQ_HEADERS) return@forEach
+                if (lk == "user-agent") hasUa = true
+                builder.header(k, v)
+            }
+            if (!hasUa) builder.header("User-Agent", DEFAULT_UA)
+            val client = com.github.catvod.net.OkHttp.client(MAIN_FRAME_TIMEOUT_MS)
+            resp = client.newCall(builder.get().build()).execute()
+            val response = resp!!
+            val headers = HashMap<String, String>()
+            for (name in response.headers.names()) {
+                if (name.lowercase() in BLOCK_RESP_HEADERS) continue
+                headers[name] = response.headers.values(name).joinToString(", ")
+            }
+            val cookies = response.headers.values("Set-Cookie")
+            if (cookies.isNotEmpty()) {
+                mainHandler.post {
+                    try {
+                        val cm = CookieManager.getInstance()
+                        cookies.forEach { cm.setCookie(url, it) }
+                    } catch (ignored: Throwable) {
+                    }
+                }
+            }
+            headers["Content-Type"] = "text/html; charset=UTF-8"
+            if (!headers.containsKey("Cache-Control")) headers["Cache-Control"] = "no-store"
+            val rawCode = response.code
+            val code = if (rawCode in 100..599) rawCode else 502
+            val status = if (code in 300..399) 200 else code
+            val stream = response.body?.byteStream()
+                ?: java.io.ByteArrayInputStream(ByteArray(0))
+            WebResourceResponse(
+                "text/html", "UTF-8", status,
+                if (status == 200) "OK" else "HTTP $status",
+                headers, stream,
+            )
+        } catch (th: Throwable) {
+            try { resp?.close() } catch (ignored: Throwable) {}
+            AppLog.i("$TAG: main frame fetch failed ${th.message}")
+            val msg = (th.message ?: "网络错误").replace("<", "&lt;")
+            val html = "<!doctype html><meta charset=utf-8><body style='background:#111;color:#ddd;font:16px sans-serif;padding:24px'>页面加载失败：$msg</body>"
+            WebResourceResponse(
+                "text/html", "UTF-8", 502, "Bad Gateway",
+                mapOf("Content-Type" to "text/html; charset=UTF-8", "Cache-Control" to "no-store"),
+                java.io.ByteArrayInputStream(html.toByteArray(Charsets.UTF_8)),
+            )
         }
     }
 
@@ -275,6 +422,20 @@ class HtmlActivity : Activity() {
         if (i < 0) return "UTF-8"
         return contentType.substring(i + "charset=".length)
             .split(";", ",")[0].trim().trim('"').ifEmpty { "UTF-8" }
+    }
+
+    /** 对齐 webhtv：页面不可见立即暂停 WebView，JS 定时器 / 音视频不会继续跑。 */
+    override fun onPause() {
+        try { webView?.onPause() } catch (ignored: Throwable) {}
+        super.onPause()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        try {
+            webView?.onResume()
+            webView?.resumeTimers()
+        } catch (ignored: Throwable) {}
     }
 
     /**
@@ -321,9 +482,9 @@ class HtmlActivity : Activity() {
             wv.removeJavascriptInterface("FmBridge")
             wv.webViewClient = object : WebViewClient() {}
             wv.webChromeClient = WebChromeClient()
+            wv.onPause()
             wv.loadUrl("about:blank")
             wv.clearHistory()
-            wv.onPause()
             (wv.parent as? ViewGroup)?.removeView(wv)
             wv.removeAllViews()
             wv.destroy()
@@ -333,6 +494,11 @@ class HtmlActivity : Activity() {
 
     private fun finishSafely() {
         mainHandler.removeCallbacks(idleClose)
+        // 立刻断开静态引用：finish 到 onDestroy 之间还有窗口，
+        // 旧引用若被 bringToFront 命中就会把没死透的页面拉回前台
+        if (live === this) live = null
+        pending = null
+        pendingRequest = null
         val left = currentReq
         currentReq = null
         try {
@@ -349,6 +515,10 @@ class HtmlActivity : Activity() {
     override fun onDestroy() {
         destroyed = true
         if (live === this) live = null
+        pending = null
+        pendingRequest = null
+        cancelLoadTimeout()
+        autoCloseRunnable?.let { mainHandler.removeCallbacks(it) }
         mainHandler.removeCallbacks(idleClose)
         val left = currentReq
         currentReq = null
@@ -526,6 +696,14 @@ class HtmlActivity : Activity() {
         @JavascriptInterface
         fun ext(): String = req.ext
 
+        /** 同源网关地址（宿主自己的文件服务端口），供 fm.res() 转跨域请求。 */
+        @JavascriptInterface
+        fun gatewayBase(): String = try {
+            com.github.avbox.osc.server.ControlManager.get().getAddress(true)
+        } catch (th: Throwable) {
+            ""
+        }
+
         @JavascriptInterface
         fun log(msg: String?) {
             AppLog.i("$TAG[${req.siteKey}]: ${msg ?: ""}")
@@ -587,6 +765,24 @@ class HtmlActivity : Activity() {
         private const val TAG = "HtmlActivity"
         private const val AUTO_CLOSE_MS = 30_000L
         private const val IDLE_CLOSE_MS = 8_000L
+        private const val LOAD_TIMEOUT_MS = 15_000L
+        private const val MAIN_FRAME_TIMEOUT_MS = 15_000L
+        private const val DEFAULT_UA =
+            "Mozilla/5.0 (Linux; Android 12; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+
+        private val BLOCK_REQ_HEADERS = setOf(
+            "host", "connection", "content-length", "content-encoding",
+            "accept-encoding", "if-none-match", "if-modified-since", "range",
+        )
+        private val BLOCK_RESP_HEADERS = setOf(
+            "connection", "transfer-encoding", "keep-alive", "content-length",
+            "content-encoding", "content-type", "content-disposition",
+            "set-cookie", "set-cookie2",
+            "content-security-policy", "content-security-policy-report-only",
+            "x-content-type-options", "x-frame-options",
+            "cross-origin-embedder-policy", "cross-origin-opener-policy",
+            "cross-origin-resource-policy",
+        )
 
         @Volatile
         private var fmApiCache: String? = null
@@ -613,25 +809,13 @@ class HtmlActivity : Activity() {
             return true
         }
 
-        /** 页面已存活且是同一站点：把它调到前台，不再新建。返回 true 表示已处理。 */
+        /**
+         * 【已停用】旧 type 6 遗留的 HtmlSpider 仍会调用，保留签名以免编译断裂，
+         * 但一律返回 false —— 不再把旧页面 reorder 到前台。返回宫格后旧实例必须
+         * 已经死透，每次点开都是干净的新实例（webhtv 生命周期对齐）。
+         */
         @JvmStatic
-        fun bringToFront(siteKey: String): Boolean {
-            val act = live ?: return false
-            if (act.isFinishing || act.isDestroyed) {
-                live = null
-                return false
-            }
-            if (act.curSiteKey != siteKey) return false
-            return try {
-                val i = android.content.Intent(act, HtmlActivity::class.java)
-                i.addFlags(android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-                act.startActivity(i)
-                true
-            } catch (th: Throwable) {
-                AppLog.e(TAG, th)
-                false
-            }
-        }
+        fun bringToFront(siteKey: String): Boolean = false
 
         /** 立刻收掉页面（切站点 / spider 销毁时） */
         @JvmStatic

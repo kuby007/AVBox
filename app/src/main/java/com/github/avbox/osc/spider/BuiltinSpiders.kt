@@ -102,7 +102,8 @@ private class CspNostr(
                 val key = siteKey ?: ""
                 val page = resolvePage()
                 if (page.isEmpty()) return@post
-                if (HtmlActivity.bringToFront(key)) return@post
+                // 不再把旧页面 reorder 到前台：返回宫格后旧实例必须已经死透，
+                // 每次点开都是干净的新实例（webhtv 的 WebView 生命周期对齐）。
                 HtmlActivity.finishIfRunning(null)
                 HtmlActivity.pending = HtmlActivity.Request(
                     siteKey = key,

@@ -106,6 +106,39 @@ class PythonLoader {
         }
     }
 
+    /**
+     * 宿主兼容加固：放行子程序常用的 ActivityThread 相关 hidden API。
+     *
+     * 部分 py 工具脚本不调用宿主注入的 builtins.getActivity()，而是自己反射
+     * android.app.ActivityThread 取当前 Activity 来弹原生对话框。targetSdk 37 下
+     * hidden API 反射被拒会让它们直接 return「已取消本次弹窗」—— 弹窗根本没被创建。
+     * 这里只放行必要前缀，平台不提供该开关时静默跳过，不影响 Python 环境其它功能。
+     */
+    private fun allowHiddenApis() {
+        try {
+            val vm = Class.forName("dalvik.system.VMRuntime")
+            val getRuntime = vm.getDeclaredMethod("getRuntime")
+            getRuntime.isAccessible = true
+            val runtime = getRuntime.invoke(null) ?: return
+            val setExemptions = vm.getDeclaredMethod(
+                "setHiddenApiExemptions", Array<String>::class.java,
+            )
+            setExemptions.isAccessible = true
+            val prefixes = arrayOf(
+                "Landroid/app/ActivityThread;",
+                "Landroid/app/ActivityThread\$",
+                "Landroid/app/Activity;",
+                "Landroid/app/Application;",
+                "Ldalvik/system/VMRuntime;",
+            )
+            // 作为单个 String[] 参数传入，不能被 vararg 展开
+            setExemptions.invoke(runtime, prefixes as Any)
+            AppLog.i("PythonLoader: hidden api exemption installed")
+        } catch (th: Throwable) {
+            AppLog.i("PythonLoader: hidden api exemption unavailable: ${th.message}")
+        }
+    }
+
     private fun setSdk(context: Context) {
         val logLevel = if (BuildConfig.DEBUG) PyLog.LEVEL_V else PyLog.LEVEL_RELEASE
         val logFilter = if (BuildConfig.DEBUG) PyLog.FILTER_NW or PyLog.FILTER_LC else 0
@@ -135,6 +168,7 @@ class PythonLoader {
         setSdk(app)
         if (pyInstance == null) {
             try {
+                allowHiddenApis()
                 if (!Python.isStarted()) {
                     val platform = AndroidPlatform(app)
                     androidPlatform = platform

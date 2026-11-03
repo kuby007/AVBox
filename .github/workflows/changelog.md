@@ -1,3 +1,12 @@
+## 1.3.4.8-xbox
+- 参照 webhtv 修复 html 页面：补 WebView 生命周期（onPause/onResume/resumeTimers）、关闭时立即清理静态引用、撤掉旧页面 reorder 复用，返回宫格后旧脚本不再残留
+- 在线 html 主文档改由宿主共享 OkHttp 代取：明确超时、主帧强制 text/html、剥离 CSP/X-Frame-Options 等阻断头、失败给可见提示；子资源仍交回 WebView 原生栈
+- 新增 15 秒加载超时自动重建 WebView 与渲染进程崩溃自愈；不再劫持 window.fetch，恢复浏览器原生异步速度
+- 宿主新增 /webResource 同源网关与 fm.res()，跨域请求由宿主 OkHttp 代发并加 CORS
+- py 宿主放行 ActivityThread 相关 hidden API，兼容自行反射取 Activity 弹窗的子程序；失败时静默跳过
+
+---
+
 ## 1.3.4.7-xbox
 - 同步上游 main 依赖升级（AGP 9.5.0 / Chaquopy 17.2.0 / Gson 2.15.0），并完成构建验证
 - 本次仅推进版本号，未改动功能代码；webhtv 参照修复等暂缓项保持暂停

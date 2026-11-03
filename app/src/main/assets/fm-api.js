@@ -1,5 +1,5 @@
 /**
- * fm-api.js —— HTML 脚本（type 6）运行时的桥接层。
+ * fm-api.js —— HTML 站点运行时的桥接层。
  *
  * 注入时机：页面加载完成后由 HtmlActivity 注入。
  * 脚本用法（与 Spider 接口一一对应，脚本自己返回数据，不是渲染宫格）：
@@ -71,11 +71,31 @@
   };
 
   /**
-   * fetch 垫片：把页面里的 fetch 接到 FmBridge 上。
-   *
-   * 不做这层的话，脚本用 fetch/XHR 取数据时走的是 WebView 自己的网络栈，
-   * 站点代理开关对它完全无效（OkHttp 的 proxySelector 管不到 WebView），
-   * 需要代理的站点就会一直取不到数据。垫片让它跟 fm.req 一样走 App 网络栈。
+   * 跨域资源网关：把任意 http(s) url 转成宿主自己文件服务上的同源地址
+   * http://127.0.0.1:<port>/webResource?url=... ，由宿主 OkHttp 代发并加全套 CORS。
+   * 脚本写 fetch(fm.res(url)) 即可，不再被 CORS / CSP 卡死（对齐 webhtv 的
+   * HomeWebBridge.resourceUrl + WebResourceGateway）。
+   */
+  fm.res = function (url, opt) {
+    opt = opt || {};
+    var base = '';
+    try { base = window.FmBridge.gatewayBase(); } catch (e) {}
+    if (!base || !/^https?:\/\//i.test(String(url))) return url;
+    var q = base + 'webResource?url=' + encodeURIComponent(String(url));
+    if (opt.headers) {
+      try { q += '&headers=' + encodeURIComponent(JSON.stringify(opt.headers)); } catch (e) {}
+    }
+    if (opt.credentials === 'include') q += '&credentials=include';
+    return q;
+  };
+
+  /**
+   * 显式的同步请求通道（走 App 网络栈，站点代理开关对它生效）。
+   * 【不再劫持 window.fetch】—— 以前把原生 fetch 换成同步桥接后，页面里
+   * 每个请求都阻塞 JS 线程等一趟网络，页面初始化被拖死、白屏，这就是
+   * 「在线 html 比浏览器慢 / 有些加载不出来」的一部分原因。
+   * 现在保留浏览器原生 fetch 的异步与速度，需要走宿主网络栈时由脚本显式
+   * 调 fm.req / fm.fetch，跨域则用 fm.res 转同源网关。
    */
   fm.fetch = function (url, opt) {
     opt = opt || {};
@@ -92,11 +112,6 @@
       headers: { get: function () { return null; } }
     });
   };
-
-  if (window.__fmFetchPatched !== true) {
-    window.__fmFetchPatched = true;
-    window.fetch = fm.fetch;
-  }
 
   /** 站点 ext 持久化（对应修改扩展参数弹窗写入的值） */
   fm.getVar = function (k, def) {

@@ -154,6 +154,13 @@ class RemoteServer(port: Int, context: Context) : NanoHTTPD(port) {
     }
 
     override fun serve(session: NanoHTTPD.IHTTPSession): NanoHTTPD.Response {
+        if (session.method == NanoHTTPD.Method.OPTIONS &&
+            session.uri.startsWith("/webResource")) {
+            return cors(
+                NanoHTTPD.newFixedLengthResponse(NanoHTTPD.Response.Status.NO_CONTENT, NanoHTTPD.MIME_PLAINTEXT, ""),
+                session,
+            )
+        }
         if (!session.uri.isEmpty()) {
             var fileName = session.uri.trim { it <= ' ' }
             if (fileName.indexOf('?') >= 0) {
@@ -162,6 +169,9 @@ class RemoteServer(port: Int, context: Context) : NanoHTTPD(port) {
             if (session.method == NanoHTTPD.Method.GET) {
                 if (isProxyRequest(fileName, session.parms)) {
                     return handleProxy(session)
+                }
+                if (fileName == "/webResource") {
+                    return handleWebResource(session)
                 }
                 for (process in getRequestList) {
                     if (process.isRequest(session, fileName)) {
@@ -256,6 +266,88 @@ class RemoteServer(port: Int, context: Context) : NanoHTTPD(port) {
             }
         }
         return createPlainTextResponse(NanoHTTPD.Response.Status.NOT_FOUND, "Not Found")
+    }
+
+    /**
+     * 跨域资源网关（对齐 webhtv 的 WebResourceGateway）。
+     *
+     * 页面里的原生 fetch 发到这个同源端点，由宿主共享 OkHttp 代发并加全套 CORS，
+     * 于是跨域请求不再被 CORS / CSP 拦死，也顺带让站点代理链路生效。
+     * 只服务本机 WebView，外部来源不额外鉴权与 /file/ 一致。
+     */
+    private fun handleWebResource(session: NanoHTTPD.IHTTPSession): NanoHTTPD.Response {
+        val target = session.parms["url"]
+        if (target.isNullOrEmpty() || !(target.startsWith("http://") || target.startsWith("https://"))) {
+            return cors(
+                NanoHTTPD.newFixedLengthResponse(NanoHTTPD.Response.Status.BAD_REQUEST, NanoHTTPD.MIME_PLAINTEXT, "Unsupported url"),
+                session,
+            )
+        }
+        var resp: okhttp3.Response? = null
+        return try {
+            val builder = okhttp3.Request.Builder().url(target)
+            builder.header("User-Agent", WEB_RESOURCE_UA)
+            val extra = session.parms["headers"]
+            if (!extra.isNullOrEmpty()) {
+                try {
+                    val jo = org.json.JSONObject(extra)
+                    val it = jo.keys()
+                    while (it.hasNext()) {
+                        val k = it.next()
+                        if (k.equals("User-Agent", true) || k.equals("Host", true) ||
+                            k.equals("Content-Length", true)) continue
+                        builder.header(k, jo.optString(k))
+                    }
+                } catch (ignored: Throwable) {
+                }
+            }
+            headerOf(session, "range")?.let { builder.header("Range", it) }
+            val m = if (session.method == NanoHTTPD.Method.OPTIONS) "GET" else session.method.name
+            if (m.equals("GET", true) || m.equals("HEAD", true)) {
+                builder.method(m, null)
+            } else {
+                var body = session.parms["body"]
+                if (body.isNullOrEmpty()) body = session.parms["postData"]
+                builder.method(m, okhttp3.RequestBody.create(null, body ?: ""))
+            }
+            resp = com.github.catvod.net.OkHttp.client(WEB_RESOURCE_TIMEOUT_MS)
+                .newCall(builder.build()).execute()
+            val r = resp!!
+            val type = r.body?.contentType()?.toString() ?: NanoHTTPD.MIME_PLAINTEXT
+            val out = NanoHTTPD.newChunkedResponse(
+                nanoStatus(r.code), type,
+                r.body?.byteStream() ?: ByteArrayInputStream(ByteArray(0)),
+            )
+            for (name in r.headers.names()) {
+                if (name.lowercase() in SKIP_GATEWAY_HEADERS) continue
+                r.headers.values(name).forEach { out.addHeader(name, it) }
+            }
+            cors(out, session)
+        } catch (th: Throwable) {
+            try { resp?.close() } catch (ignored: Throwable) {}
+            AppLog.e("echo-webResource error: " + th.message)
+            cors(
+                NanoHTTPD.newFixedLengthResponse(
+                    NanoHTTPD.Response.Status.INTERNAL_ERROR,
+                    NanoHTTPD.MIME_PLAINTEXT,
+                    th.message ?: "webResource failed",
+                ),
+                session,
+            )
+        }
+    }
+
+    private fun headerOf(session: NanoHTTPD.IHTTPSession, name: String): String? =
+        session.headers.entries.firstOrNull { it.key.equals(name, true) }?.value?.takeIf { it.isNotEmpty() }
+
+    private fun cors(response: NanoHTTPD.Response, session: NanoHTTPD.IHTTPSession): NanoHTTPD.Response {
+        response.addHeader("Access-Control-Allow-Origin", headerOf(session, "origin") ?: "*")
+        response.addHeader("Access-Control-Allow-Credentials", "true")
+        response.addHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,HEAD,OPTIONS")
+        response.addHeader("Access-Control-Allow-Headers", "*")
+        response.addHeader("Access-Control-Expose-Headers", "*")
+        response.addHeader("Access-Control-Max-Age", "86400")
+        return response
     }
 
     private fun isProxyRequest(fileName: String, params: Map<String, String>?): Boolean {
@@ -388,6 +480,14 @@ class RemoteServer(port: Int, context: Context) : NanoHTTPD(port) {
     companion object {
         @JvmField
         var serverPort = 9978
+
+        private const val WEB_RESOURCE_TIMEOUT_MS = 15_000L
+        private const val WEB_RESOURCE_UA =
+            "Mozilla/5.0 (Linux; Android 12; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+        private val SKIP_GATEWAY_HEADERS = setOf(
+            "connection", "transfer-encoding", "keep-alive", "content-length",
+            "content-encoding", "content-type",
+        )
 
         private const val M3U8_SLOT_LIMIT = 4
 
