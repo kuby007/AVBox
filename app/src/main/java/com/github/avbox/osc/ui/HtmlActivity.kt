@@ -191,7 +191,18 @@ class HtmlActivity : Activity() {
                 injectApiOnly()
             }
 
+            override fun onReceivedHttpError(
+                view: WebView?,
+                request: android.webkit.WebResourceRequest?,
+                errorResponse: android.webkit.WebResourceResponse?,
+            ) {
+                if (request == null || !request.isForMainFrame) return
+                AppLog.i("$TAG: main frame HTTP ${errorResponse?.statusCode} $url")
+                if (!req.resident) settle(null) else showLoadError("HTTP " + errorResponse?.statusCode)
+            }
+
             override fun onPageFinished(view: WebView?, url: String?) {
+                AppLog.i("$TAG: pageFinished $url title=${view?.title}")
                 cancelLoadTimeout()
                 // 常驻模式：只保证 fm 桥在页面上，不调用任何脚本函数
                 if (req.resident) injectApiOnly() else injectAndInvoke(req)

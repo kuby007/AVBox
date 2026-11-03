@@ -190,20 +190,73 @@
 
   /** 老 spider 契约：单参同步返回正文字符串（不能改成异步，html spider 依赖它）。
    *  主流 WebHome 契约：传了 options（或走 fm.request）→ 真异步 Promise 结构化响应。 */
+  /* ===== 浏览器原生通道（对齐 webhtv：宿主不劫持 fetch/XHR） =====
+   *  WebView 原生 fetch 自带页面 Cookie / Referer / 自动解压 / 正确 CORS，
+   *  图片与接口都优先走它；只有原生失败（CORS、混合内容）才回退宿主 OkHttp 桥接。 */
+  function nativeRequest(url, opt) {
+    opt = opt || {};
+    return new Promise(function (resolve) {
+      var settled = false;
+      function done(r) { if (!settled) { settled = true; resolve(r); } }
+      try {
+        var secs = Number(opt.timeout || 30); if (!(secs > 0)) secs = 30;
+        var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        var timer = setTimeout(function () { try { ctrl && ctrl.abort(); } catch (e) {} done(toResponse({ ok: false, status: 0, body: '', error: 'timeout' }, url, opt)); }, secs * 1000);
+        var h = {};
+        try {
+          var hh = opt.headers || {};
+          Object.keys(hh).forEach(function (k) {
+            var l = k.toLowerCase();
+            if (l !== 'user-agent' && l !== 'host' && l !== 'origin' && l !== 'content-length') h[k] = hh[k];
+          });
+        } catch (e) {}
+        var init = { method: String(opt.method || 'GET').toUpperCase(), headers: h, credentials: opt.credentials || 'include', cache: 'no-cache', signal: ctrl ? ctrl.signal : undefined };
+        if (init.method !== 'GET' && init.method !== 'HEAD') init.body = opt.body || undefined;
+        fetch(url, init).then(function (resp) {
+          clearTimeout(timer);
+          var rt = String(opt.responseType || 'text');
+          if (rt === 'arraybuffer' || rt === 'blob' || rt === 'base64') {
+            resp.arrayBuffer().then(function (buf) {
+              var bytes = new Uint8Array(buf), bin = '', i;
+              for (i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+              done(toResponse({ ok: resp.ok, status: resp.status, body: typeof btoa !== 'undefined' ? btoa(bin) : bin, b64: true }, url, opt));
+            })['catch'](function (e) { done(toResponse({ ok: false, status: resp.status, body: '', error: String(e) }, url, opt)); });
+            return;
+          }
+          resp.text().then(function (t) {
+            var r = toResponse({ ok: resp.ok, status: resp.status, body: t }, url, opt);
+            try {
+              var real = resp.headers.get('set-cookie');
+              if (real) { r.setCookie = real; r.cookies = [real]; }
+              var hh2 = r.headers;
+              r.headers = { get: function (k) { try { return resp.headers.get(k); } catch (e) { return null; } } };
+              if (hh2 && hh2.map) r.headers.map = hh2.map;
+            } catch (e) {}
+            done(r);
+          })['catch'](function (e) { done(toResponse({ ok: false, status: resp.status, body: '', error: String(e) }, url, opt)); });
+        })['catch'](function (e) {
+          clearTimeout(timer);
+          done(toResponse({ ok: false, status: 0, body: '', error: String(e && e.message || e) }, url, opt));
+        });
+      } catch (e) { done(toResponse({ ok: false, status: 0, body: '', error: String(e) }, url, opt)); }
+    });
+  }
+
+  /** 主流契约：单参 fm.req 保持同步字符串（老 spider 依赖）；带 options 时原生优先、桥接兜底 */
   fm.req = function (url, opt) {
     var hasOptions = arguments.length >= 2 && opt && typeof opt === 'object';
     if (!hasOptions) {
-      var headers = '';
       var text = '';
-      try { text = B().req(url, headers, 'GET', ''); } catch (e) {
-        fm.log('fm.req failed: ' + e);
-      }
+      try { text = B().req(url, '', 'GET', ''); } catch (e) { fm.log('fm.req failed: ' + e); }
       return text || '';
     }
-    return asyncRequest(url, opt);
+    return nativeRequest(url, opt).then(function (r) {
+      if ((r && r.ok) || (r && r.body)) return r;
+      return asyncRequest(url, opt);
+    });
   };
 
-  /** 总是返回 Promise 的结构化请求（主流 WebHome 显式通道） */
+/** 总是返回 Promise 的结构化请求（主流 WebHome 显式通道） */
   fm.request = function (url, opt) {
     try { return asyncRequest(url, opt && typeof opt === 'object' ? opt : {}); }
     catch (e) { return Promise.resolve(toResponse({ ok: false, status: 0, body: '', error: String(e) }, url, opt)); }
@@ -226,7 +279,8 @@
   fm.res = function (url, opt) {
     opt = opt || {};
     var base = safe(function () { return B().gatewayBase(); }, '');
-    if (!base || !/^https?:\/\//i.test(String(url))) return url;
+    if (!/^https?:\/\//i.test(String(url))) return url;
+    if (!opt.headers && opt.credentials !== 'include') return url;   // 无自定义头：原 url 交给 WebView 原生加载
     var q = base + 'webResource?url=' + encodeURIComponent(String(url));
     if (opt.headers) {
       try { q += '&headers=' + encodeURIComponent(JSON.stringify(opt.headers)); } catch (e) {}
