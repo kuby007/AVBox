@@ -191,6 +191,11 @@ class HtmlActivity : Activity() {
                 cancelLoadTimeout()
                 // 常驻模式：只保证 fm 桥在页面上，不调用任何脚本函数
                 if (req.resident) injectApiOnly() else injectAndInvoke(req)
+                // 主帧内联的 SDK 可能早于页面注册监听，这里补派一次（内部去重）
+                try {
+                    view?.evaluateJavascript("window.__fmSdkBoot&&window.__fmSdkBoot()", null)
+                } catch (ignored: Throwable) {
+                }
             }
 
             /**
@@ -378,12 +383,15 @@ class HtmlActivity : Activity() {
                 }
             }
             headers["Content-Type"] = "text/html; charset=UTF-8"
-            if (!headers.containsKey("Cache-Control")) headers["Cache-Control"] = "no-store"
+            if (!headers.containsKey("Cache-Control")) headers["Cache-Control"] = "no-cache"
             val rawCode = response.code
             val code = if (rawCode in 100..599) rawCode else 502
             val status = if (code in 300..399) 200 else code
-            val stream = response.body?.byteStream()
-                ?: java.io.ByteArrayInputStream(ByteArray(0))
+            // 主文档开头内联注入 SDK：页面任何脚本运行前 window.fm 已存在
+            val rawHtml = response.body?.string() ?: ""
+            val stream = java.io.ByteArrayInputStream(
+                injectSdkIntoMainFrame(rawHtml).toByteArray(Charsets.UTF_8),
+            )
             WebResourceResponse(
                 "text/html", "UTF-8", status,
                 if (status == 200) "OK" else "HTTP $status",
@@ -400,6 +408,24 @@ class HtmlActivity : Activity() {
                 java.io.ByteArrayInputStream(html.toByteArray(Charsets.UTF_8)),
             )
         }
+    }
+
+    /**
+     * 主文档开头内联注入 SDK（对齐 webhtv 的 document-start）。
+     *
+     * 以前只靠 onPageStarted/onPageFinished 用 evaluateJavascript 注入：那是 post 到
+     * 主线程执行，页面自己的脚本在渲染线程先跑，window.fm 常常还是 undefined，
+     * 于是页面初始化卡在「准备加载…」，在线 html 看着就像加载不出来 / 极慢。
+     * 内联到文档最前面后，页面任何脚本运行前 fm 已就位；fmsdk 事件再由
+     * __fmSdkBoot 在 DOM 就绪后派发。
+     */
+    private fun injectSdkIntoMainFrame(html: String): String {
+        if (html.isEmpty()) return html
+        val api = readAsset("fm-api.js") ?: return html
+        // fm-api.js 不含 </script>，可安全内联
+        // 这里只定义，不抢先派发：文档开头 DOM 未就绪，页面监听器还没注册，
+        // 事件会丢。fm-api.js 自己挂在 DOMContentLoaded / load 上派发。
+        return "<script>(function(){try{" + api + "}catch(e){}})();</script>\n" + html
     }
 
     private fun showLoadError(desc: String?) {
@@ -755,6 +781,149 @@ class HtmlActivity : Activity() {
             }
         }
 
+        /** ---------- 主流 WebHome SDK 所需的宿主能力 ---------- */
+
+        @JavascriptInterface
+        fun cacheGet(key: String?, rule: String?): String =
+            try { KV.get(cacheKey(key, rule), "") ?: "" } catch (th: Throwable) { "" }
+
+        @JavascriptInterface
+        fun cacheSet(key: String?, value: String?, rule: String?) {
+            try { KV.put(cacheKey(key, rule), value ?: "") } catch (th: Throwable) { AppLog.e(TAG, th) }
+        }
+
+        @JavascriptInterface
+        fun cacheDel(key: String?, rule: String?) {
+            // KV 无按前缀删除接口；写空串与"不存在返回空串"语义一致
+            try { KV.put(cacheKey(key, rule), "") } catch (th: Throwable) { AppLog.e(TAG, th) }
+        }
+
+        @JavascriptInterface
+        fun cacheClear(rule: String?) {
+            AppLog.i("$TAG: fm.cache.clear ${rule ?: ""}")
+        }
+
+        private fun cacheKey(key: String?, rule: String?): String =
+            "cache_" + (if (rule.isNullOrEmpty()) "" else rule + "_") + (key ?: "")
+
+        /** 页面返回：先走 WebView 内部历史，没有上一级才关承载页 */
+        @JavascriptInterface
+        fun back() {
+            mainHandler.post {
+                val wv = webView
+                if (wv != null && wv.canGoBack()) {
+                    try { wv.goBack() } catch (th: Throwable) { AppLog.e(TAG, th) }
+                } else {
+                    finishNow()
+                }
+            }
+        }
+
+        @JavascriptInterface
+        fun reload() {
+            mainHandler.post {
+                try { webView?.reload() } catch (th: Throwable) { AppLog.e(TAG, th) }
+            }
+        }
+
+        @JavascriptInterface
+        fun toast(msg: String?) {
+            mainHandler.post {
+                try {
+                    android.widget.Toast.makeText(
+                        this@HtmlActivity, msg ?: "", android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                } catch (ignored: Throwable) {
+                }
+            }
+        }
+
+        @JavascriptInterface
+        fun siteInfo(): String = try {
+            JSONObject()
+                .put("key", req.siteKey)
+                .put("siteKey", req.siteKey)
+                .put("homePage", req.api)
+                .put("ext", req.ext)
+                .toString()
+        } catch (th: Throwable) { "{}" }
+
+        @JavascriptInterface
+        fun configInfo(): String = try {
+            JSONObject().put("mode", "mobile").put("desc", "").put("driveCheck", true).toString()
+        } catch (th: Throwable) { "{}" }
+
+        @JavascriptInterface
+        fun deviceInfo(): String = try {
+            JSONObject().put("mode", "mobile").put("isLeanback", false)
+                .put("sdk", Build.VERSION.SDK_INT).toString()
+        } catch (th: Throwable) { "{}" }
+
+        @JavascriptInterface
+        fun extInfo(): String = try {
+            JSONObject().put("siteKey", req.siteKey).put("homePage", req.api)
+                .put("enabled", true).put("matched", true).put("ready", true).toString()
+        } catch (th: Throwable) { "{}" }
+
+        /** 宿主没有自定义 chrome 层，记录即可，不让页面调用抛异常 */
+        @JavascriptInterface
+        fun chrome(payload: String?) {
+            AppLog.i("$TAG: fm.ui ${payload ?: ""}")
+        }
+
+        /** 播放控制：复用 MediaSession 的同一条 host 链路 */
+        @JavascriptInterface
+        fun ctrl(action: String?) {
+            mainHandler.post {
+                try {
+                    val host = com.github.avbox.osc.player.PlaybackService.host()
+                    when (action) {
+                        "play" -> host?.resumeFromMediaSession()
+                        "pause" -> host?.pauseFromMediaSession()
+                        "stop" -> host?.stopFromMediaSession()
+                        "next" -> host?.playNext(false)
+                        "prev", "previous" -> host?.playPrevious()
+                    }
+                } catch (th: Throwable) { AppLog.e(TAG, th) }
+            }
+        }
+
+        /** 打开原生播放 / 搜索 / 首页 */
+        @JavascriptInterface
+        fun open(action: String?, payload: String?) {
+            mainHandler.post {
+                val o = try { JSONObject(payload ?: "{}") } catch (th: Throwable) { JSONObject() }
+                when (action) {
+                    "vod" -> {
+                        try {
+                            startActivity(
+                                com.github.avbox.osc.util.DetailIntent.build(
+                                    this@HtmlActivity,
+                                    o.optString("siteKey"),
+                                    o.optString("vodId"),
+                                    o.optString("title"),
+                                    o.optString("pic"),
+                                ),
+                            )
+                        } catch (th: Throwable) { AppLog.e(TAG, th) }
+                    }
+                    "play" -> {
+                        try {
+                            startActivity(
+                                com.github.avbox.osc.util.DetailIntent.build(
+                                    this@HtmlActivity,
+                                    "", o.optString("url"), o.optString("title"), "",
+                                ),
+                            )
+                        } catch (th: Throwable) { AppLog.e(TAG, th) }
+                    }
+                    // 搜索与原生页入口：关闭承载页回到宿主界面，由宿主 UI 承接
+                    "search", "openVod", "openLive", "openKeep", "openSetting" -> finishNow()
+                    else -> AppLog.i("$TAG: fm.open $action")
+                }
+            }
+        }
+
         @JavascriptInterface
         fun done(result: String?) {
             mainHandler.post { settle(result) }
@@ -772,7 +941,7 @@ class HtmlActivity : Activity() {
 
         private val BLOCK_REQ_HEADERS = setOf(
             "host", "connection", "content-length", "content-encoding",
-            "accept-encoding", "if-none-match", "if-modified-since", "range",
+            "accept-encoding", "range",
         )
         private val BLOCK_RESP_HEADERS = setOf(
             "connection", "transfer-encoding", "keep-alive", "content-length",

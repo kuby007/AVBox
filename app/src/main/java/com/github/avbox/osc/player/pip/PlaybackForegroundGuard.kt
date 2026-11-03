@@ -36,8 +36,11 @@ object PlaybackForegroundGuard {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && activity.isInPictureInPictureMode) {
                 return true
             }
+            // 三种播放页互相切换时会出现"旧页已 onStop、新页还没 onResume"的中间态，
+            // 只认 RESUMED 会把这一帧误判成"没有前端播放页"而停播。
+            if (activity.isChangingConfigurations) return true
             val owner = activity as? LifecycleOwner ?: continue
-            if (owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return true
+            if (owner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return true
         }
         return false
     }

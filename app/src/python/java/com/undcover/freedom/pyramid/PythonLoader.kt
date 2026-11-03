@@ -98,6 +98,10 @@ class PythonLoader {
                 builtins.dialog = dialog
                 builtins.getActivity = getActivity
                 builtins.runOnUiThread = runOnUiThread
+                # 同类脚本里常见的别名，一并给全，避免因为命名差异拿不到 Activity
+                builtins.get_activity = getActivity
+                builtins.py_dialog = dialog
+                builtins.runOnUi = runOnUiThread
             """.trimIndent()
             py.getBuiltins().callAttr("exec", code)
             AppLog.i("PythonLoader: py bridge installed")
@@ -129,13 +133,41 @@ class PythonLoader {
                 "Landroid/app/ActivityThread\$",
                 "Landroid/app/Activity;",
                 "Landroid/app/Application;",
+                "Landroid/app/ContextImpl;",
+                "Landroid/app/LoadedApk;",
+                "Landroid/app/Instrumentation;",
+                "Landroid/content/ContextWrapper;",
+                "Landroid/view/View;",
+                "Landroid/view/Window;",
                 "Ldalvik/system/VMRuntime;",
+                "Ljava/lang/Class;",
+                "Ljava/lang/reflect/Method;",
+                "Ljava/lang/reflect/Field;",
             )
             // 作为单个 String[] 参数传入，不能被 vararg 展开
             setExemptions.invoke(runtime, prefixes as Any)
-            AppLog.i("PythonLoader: hidden api exemption installed")
+            AppLog.i("PythonLoader: hidden api exemption installed (${prefixes.size})")
         } catch (th: Throwable) {
             AppLog.i("PythonLoader: hidden api exemption unavailable: ${th.message}")
+            // 备用：部分 ROM 挡住 getDeclaredMethod，但 declaredMethods 仍可枚举
+            try {
+                val vm = Class.forName("dalvik.system.VMRuntime")
+                val runtime = vm.getDeclaredMethod("getRuntime").apply { isAccessible = true }
+                    .invoke(null) ?: return
+                val m = vm.declaredMethods.firstOrNull { it.name == "setHiddenApiExemptions" }
+                    ?: return
+                m.isAccessible = true
+                m.invoke(runtime, arrayOf(
+                    "Landroid/app/ActivityThread;",
+                    "Landroid/app/ActivityThread\$",
+                    "Landroid/app/Activity;",
+                    "Landroid/app/Application;",
+                    "Ldalvik/system/VMRuntime;",
+                ) as Any)
+                AppLog.i("PythonLoader: hidden api exemption installed (fallback)")
+            } catch (th2: Throwable) {
+                AppLog.i("PythonLoader: hidden api exemption fallback failed: ${th2.message}")
+            }
         }
     }
 

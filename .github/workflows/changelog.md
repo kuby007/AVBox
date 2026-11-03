@@ -1,3 +1,12 @@
+## 1.3.4.9-xbox
+- 远程 html：主文档开头内联注入宿主 SDK（对齐 webhtv document-start），页面脚本运行前 window.fm 已就位；DOM 就绪后派发 fmsdk 事件，不再卡在「准备加载…」
+- fm 桥升级到主流 WebHome 契约：fm.req(url, options) / fm.request 返回 Promise 结构化响应，补 fm.cache / fm.res / fm.back / fm.reload / fm.play / fm.vod / fm.site / fm.config / fm.device / fm.ctrl / fm.ui 等；老 spider 的同步 fm.req(url) 与 fm.done 保持不变
+- 主帧放行条件请求头、去掉 no-store，二次打开可走 304/缓存，不再全量回源
+- 画中画上一集/下一集：改走 owner（PlaybackHostApi），与 MediaSession 同一条链路；原先调用的 PlaybackEngine.playNext/playPrevious 是空实现
+- 播放页前台判定放宽到 STARTED，三种播放页互相切换的中间态不再被误判为无前端而停播
+- 站点管理：分类筛选下按可见序列重排，选中项与可见邻居交换，不再出现「移动无效」的错觉
+- py 弹窗：hidden API 豁免前缀补全 + 备用注入路径 + builtins 别名
+
 ## 1.3.4.8-xbox
 - 参照 webhtv 修复 html 页面：补 WebView 生命周期（onPause/onResume/resumeTimers）、关闭时立即清理静态引用、撤掉旧页面 reorder 复用，返回宫格后旧脚本不再残留
 - 在线 html 主文档改由宿主共享 OkHttp 代取：明确超时、主帧强制 text/html、剥离 CSP/X-Frame-Options 等阻断头、失败给可见提示；子资源仍交回 WebView 原生栈

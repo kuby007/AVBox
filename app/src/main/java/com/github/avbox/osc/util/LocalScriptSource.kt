@@ -343,11 +343,53 @@ object LocalScriptSource {
         return true
     }
 
-    /** 排序：把 keys 里的条目整体上移/下移一位；inBac=true 时作用于回收站 */
-    fun reorder(dir: String, keys: Collection<String>, up: Boolean, inBac: Boolean = false): Boolean {
+    /**
+     * 排序：把 keys 里的条目整体上移/下移一位；inBac=true 时作用于回收站。
+     *
+     * visibleKeys 非空表示当前处于某个分类筛选下。此时显示的是全量列表的【子集】，
+     * 若仍按全量相邻交换，可见的相邻两项在全量里往往隔着别的分类项，换完屏幕上的
+     * 顺序纹丝不动 —— 就是"切换分类后上下移动无效"的错觉来源。
+     * 分类模式下改为在可见序列内与相邻可见项交换，再写回全量对应的位置。
+     */
+    fun reorder(
+        dir: String,
+        keys: Collection<String>,
+        up: Boolean,
+        inBac: Boolean = false,
+        visibleKeys: Set<String>? = null,
+    ): Boolean {
         if (keys.isEmpty()) return false
         val (sites, bac) = load(dir)
         val list = if (inBac) bac else sites
+        if (visibleKeys != null) {
+            val pos = (0 until list.size).filter { visibleKeys.contains(list[it].optString("key")) }
+            if (pos.isEmpty()) return false
+            val vis = ArrayList(pos.map { list[it] })
+            var changed = false
+            if (up) {
+                for (i in 1 until vis.size) {
+                    if (keys.contains(vis[i].optString("key")) &&
+                        !keys.contains(vis[i - 1].optString("key"))
+                    ) {
+                        val t = vis[i]; vis[i] = vis[i - 1]; vis[i - 1] = t
+                        changed = true
+                    }
+                }
+            } else {
+                for (i in vis.size - 2 downTo 0) {
+                    if (keys.contains(vis[i].optString("key")) &&
+                        !keys.contains(vis[i + 1].optString("key"))
+                    ) {
+                        val t = vis[i]; vis[i] = vis[i + 1]; vis[i + 1] = t
+                        changed = true
+                    }
+                }
+            }
+            if (!changed) return false
+            for ((k, p) in pos.withIndex()) list[p] = vis[k]
+            save(dir, sites, bac)
+            return true
+        }
         val idx = ArrayList<Int>()
         for (i in list.indices) if (keys.contains(list[i].optString("key"))) idx.add(i)
         if (idx.isEmpty()) return false

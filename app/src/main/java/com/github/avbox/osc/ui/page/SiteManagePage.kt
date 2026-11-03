@@ -152,10 +152,16 @@ fun SiteManageScreen(
                 ) {
                     var changed = false
                     if (keepSel.isNotEmpty()) {
-                        changed = LocalScriptSource.reorder(dir, keepSel.toList(), true) || changed
+                        changed = LocalScriptSource.reorder(
+                            dir, keepSel.toList(), true, false,
+                            visibleSites.map { it.key() }.toSet(),
+                        ) || changed
                     }
                     if (goneSel.isNotEmpty()) {
-                        changed = LocalScriptSource.reorder(dir, goneSel.toList(), true, true) || changed
+                        changed = LocalScriptSource.reorder(
+                            dir, goneSel.toList(), true, true,
+                            visibleBac.map { it.key() }.toSet(),
+                        ) || changed
                     }
                     if (changed) refresh()
                 }
@@ -166,10 +172,16 @@ fun SiteManageScreen(
                 ) {
                     var changed = false
                     if (keepSel.isNotEmpty()) {
-                        changed = LocalScriptSource.reorder(dir, keepSel.toList(), false) || changed
+                        changed = LocalScriptSource.reorder(
+                            dir, keepSel.toList(), false, false,
+                            visibleSites.map { it.key() }.toSet(),
+                        ) || changed
                     }
                     if (goneSel.isNotEmpty()) {
-                        changed = LocalScriptSource.reorder(dir, goneSel.toList(), false, true) || changed
+                        changed = LocalScriptSource.reorder(
+                            dir, goneSel.toList(), false, true,
+                            visibleBac.map { it.key() }.toSet(),
+                        ) || changed
                     }
                     if (changed) refresh()
                 }

@@ -33,8 +33,12 @@ class PipActionReceiver : BroadcastReceiver() {
     private fun handle(action: String) {
         when (action) {
             ACTION_PLAY_PAUSE -> PlaybackService.peek()?.player()?.togglePlay()
-            ACTION_NEXT -> PlaybackService.peek()?.playNext(false)
-            ACTION_PREVIOUS -> PlaybackService.peek()?.playPrevious()
+            // 点播切集必须走 owner（PlayContainer 的 PlaybackHostApi），
+            // 与 MediaSession 的 onSkipToNext/Previous 同一条链路。
+            // peek() 是 PlaybackEngine，它的 playNext/playPrevious 是空实现 —— 这就是
+            // 画中画上一集/下一集点了没反应的真因。
+            ACTION_NEXT -> PlaybackService.host()?.playNext(false)
+            ACTION_PREVIOUS -> PlaybackService.host()?.playPrevious()
             ACTION_LIVE_NEXT ->
                 (ActivityStack.getInstance().currentActivity() as? PipLiveSwitch)?.pipSwitchChannel(1)
             ACTION_LIVE_PREVIOUS ->

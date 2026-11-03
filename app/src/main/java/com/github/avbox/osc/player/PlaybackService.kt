@@ -506,6 +506,10 @@ class PlaybackService : Service() {
         @JvmStatic
         fun peek(): PlaybackEngine? = engine
 
+        /** 画中画窗口按钮复用 MediaSession 的切集链路：owner 才是真正实现切集的 host */
+        @JvmStatic
+        fun host(): PlaybackHostApi? = owner?.get()
+
         private fun installDataPorts() {
             if (PlaybackPorts.ports == null) {
                 PlaybackPorts.ports = object : PlaybackDataPorts {
