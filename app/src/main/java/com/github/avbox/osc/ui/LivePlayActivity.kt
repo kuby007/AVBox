@@ -292,17 +292,39 @@ class LivePlayActivity : BaseActivity(), PipActionReceiver.PipLiveSwitch {
         )
     }
 
+    private var pipWasActive = false
+    private var pipCloseHandled = false
+
     override fun onPictureInPictureModeChanged(
         isInPictureInPictureMode: Boolean,
         newConfig: android.content.res.Configuration,
     ) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         if (isInPictureInPictureMode) {
+            pipWasActive = true
             hideControllerUiForPip()
+        } else if (isFinishing) {
+            stopPlaybackForPipClose()
         } else {
+            pipWasActive = false
             vm.setOverlayVisible(true)
             vm.setFullscreen(false)
         }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (pipWasActive && isFinishing && !isChangingConfigurations) {
+            stopPlaybackForPipClose()
+        }
+        pipWasActive = false
+    }
+
+    private fun stopPlaybackForPipClose() {
+        if (pipCloseHandled) return
+        pipCloseHandled = true
+        pipWasActive = false
+        PlaybackService.stopForPipClose(this)
     }
 
     private fun replayCurrentChannelAfterTakeover() {

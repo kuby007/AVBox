@@ -155,18 +155,43 @@ class DetailActivity : BaseActivity(), PageHost {
         )
     }
 
+    private var pipWasActive = false
+    private var pipCloseHandled = false
+
     override fun onPictureInPictureModeChanged(
         isInPictureInPictureMode: Boolean,
         newConfig: android.content.res.Configuration,
     ) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         if (isInPictureInPictureMode) {
+            pipWasActive = true
             playContainer?.uiState()?.clearOverlays()
             playContainer?.hideControllerUiForPip()
+        } else if (isFinishing) {
+            // 用户关掉小窗：Activity 被系统收掉，播放却在服务里，必须显式停
+            stopPlaybackForPipClose()
         } else {
-            // 退出小窗必须恢复控制栏，否则旋转 / 画中画 / 锁定三颗侧边按钮全部消失
+            // 回到全屏：恢复控制栏，否则旋转 / 画中画 / 锁定三颗侧边按钮全部消失
+            pipWasActive = false
             playContainer?.restoreControllerUiAfterPip()
         }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // 进入小窗不会 onStop；关掉小窗（或真正离开页面）才会走到这里。
+        // 用 pipWasActive + isFinishing 限定，普通返回退出不会误停播放。
+        if (pipWasActive && isFinishing && !isChangingConfigurations) {
+            stopPlaybackForPipClose()
+        }
+        pipWasActive = false
+    }
+
+    private fun stopPlaybackForPipClose() {
+        if (pipCloseHandled) return
+        pipCloseHandled = true
+        pipWasActive = false
+        PlaybackService.stopForPipClose(this)
     }
 
     override fun onNewIntent(intent: Intent) {

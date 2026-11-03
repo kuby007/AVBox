@@ -632,6 +632,29 @@ class PlaybackService : Service() {
             }
         }
 
+        /**
+         * 用户点掉画中画窗口的关闭按钮时收尾。
+         *
+         * Activity 会被系统 finish，但播放内核挂在本服务的会话上；服务是
+         * startService 起的，不会随 Activity 销毁而停止，只有 onTaskRemoved
+         * 才 stopSelf。所以不显式收尾，后台会一直出声。
+         */
+        @JvmStatic
+        fun stopForPipClose(context: Context?) {
+            val host = owner?.get()
+            if (host != null) {
+                try {
+                    host.stopFromMediaSession()
+                } catch (th: Throwable) {
+                    AppLog.e(TAG, th)
+                }
+            }
+            forceStopSession(context)
+            instance?.stopSelf()
+            // 服务 onDestroy 默认只 keepKernel，不释放；这里同步释放才彻底无声
+            releaseEngine()
+        }
+
         @JvmStatic
         fun stopSession(context: Context?, host: PlaybackHostApi?) {
             val current = owner?.get()
