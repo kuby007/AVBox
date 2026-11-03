@@ -641,6 +641,18 @@ class PlaybackService : Service() {
          */
         @JvmStatic
         fun stopForPipClose(context: Context?) {
+            // 点播 / 直播 / 音乐三种模式共用同一个 engine，不依赖 owner 是否还在，
+            // 直接把内核停掉；否则 owner 被提前清掉时只移除通知，声音仍在后台。
+            val current = engine
+            if (current != null) {
+                try {
+                    val view = current.player()
+                    view.pause()
+                    view.stopPlaybackKeepPlayer()
+                } catch (th: Throwable) {
+                    AppLog.e(TAG, th)
+                }
+            }
             val host = owner?.get()
             if (host != null) {
                 try {

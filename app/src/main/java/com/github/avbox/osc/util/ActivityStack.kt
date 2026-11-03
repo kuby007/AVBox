@@ -16,6 +16,11 @@ class ActivityStack private constructor() {
         return activityStack?.isEmpty() == false
     }
 
+    /** 供宿主判定「是否还有播放页在前端」使用，返回当前 Activity 快照。 */
+    fun activities(): List<Activity> {
+        return activityStack?.toList() ?: emptyList()
+    }
+
     fun currentActivity(): Activity {
         return requireNotNull(activityStack) { "activity stack not initialized" }.lastElement()
     }

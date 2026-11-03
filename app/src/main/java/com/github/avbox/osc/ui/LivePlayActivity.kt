@@ -3,6 +3,7 @@
 package com.github.avbox.osc.ui
 
 import com.github.avbox.osc.player.pip.PipLauncher
+import com.github.avbox.osc.player.pip.PlaybackForegroundGuard
 import com.github.avbox.osc.receiver.PipActionReceiver
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
@@ -225,6 +226,7 @@ class LivePlayActivity : BaseActivity(), PipActionReceiver.PipLiveSwitch {
     }
 
     override fun onDestroy() {
+        PlaybackForegroundGuard.cancel(this)
         super.onDestroy()
         overlay.hideSwitchChannelSnapshot()
         PlaybackService.peek()?.exitLive()
@@ -306,24 +308,43 @@ class LivePlayActivity : BaseActivity(), PipActionReceiver.PipLiveSwitch {
         } else if (isFinishing) {
             stopPlaybackForPipClose()
         } else {
-            pipWasActive = false
             vm.setOverlayVisible(true)
             vm.setFullscreen(false)
+            schedulePipExitDecision()
         }
     }
 
     override fun onStop() {
         super.onStop()
-        if (pipWasActive && isFinishing && !isChangingConfigurations) {
-            stopPlaybackForPipClose()
+        // 关掉小窗时系统往往只 stop 不 finish，不能再用 isFinishing 兜底。
+        if (pipWasActive) {
+            schedulePipExitDecision()
         }
         pipWasActive = false
+    }
+
+    private fun schedulePipExitDecision() {
+        PlaybackForegroundGuard.schedulePipExitCheck(
+            this,
+            Runnable {
+                // 小窗仍在时保持收起，不误弹控制层
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode) {
+                    hideControllerUiForPip()
+                } else {
+                    pipWasActive = false
+                    vm.setOverlayVisible(true)
+                    vm.setFullscreen(false)
+                }
+            },
+            Runnable { stopPlaybackForPipClose() },
+        )
     }
 
     private fun stopPlaybackForPipClose() {
         if (pipCloseHandled) return
         pipCloseHandled = true
         pipWasActive = false
+        PlaybackForegroundGuard.cancel(this)
         PlaybackService.stopForPipClose(this)
     }
 

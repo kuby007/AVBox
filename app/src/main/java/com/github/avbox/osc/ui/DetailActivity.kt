@@ -1,6 +1,7 @@
 package com.github.avbox.osc.ui
 
 import com.github.avbox.osc.player.pip.PipLauncher
+import com.github.avbox.osc.player.pip.PlaybackForegroundGuard
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
@@ -171,26 +172,44 @@ class DetailActivity : BaseActivity(), PageHost {
             // 用户关掉小窗：Activity 被系统收掉，播放却在服务里，必须显式停
             stopPlaybackForPipClose()
         } else {
-            // 回到全屏：恢复控制栏，否则旋转 / 画中画 / 锁定三颗侧边按钮全部消失
-            pipWasActive = false
+            // 回到全屏：先恢复控制栏，否则旋转 / 画中画 / 锁定三颗侧边按钮全部消失
             playContainer?.restoreControllerUiAfterPip()
+            schedulePipExitDecision()
         }
     }
 
     override fun onStop() {
         super.onStop()
-        // 进入小窗不会 onStop；关掉小窗（或真正离开页面）才会走到这里。
-        // 用 pipWasActive + isFinishing 限定，普通返回退出不会误停播放。
-        if (pipWasActive && isFinishing && !isChangingConfigurations) {
-            stopPlaybackForPipClose()
+        // 进入小窗不会 onStop；退出 / 关掉小窗才会走到这里。
+        // 多数 ROM 关小窗只 stop 不 finish（isFinishing = false），
+        // 所以不再依赖它，统一交给宿主判定三种播放页是否都不在前端。
+        if (pipWasActive) {
+            schedulePipExitDecision()
         }
         pipWasActive = false
+    }
+
+    private fun schedulePipExitDecision() {
+        PlaybackForegroundGuard.schedulePipExitCheck(
+            this,
+            Runnable {
+                // 小窗仍在（按 Home 自动进入）时不要恢复控制栏
+                if (isInPipMode()) {
+                    playContainer?.hideControllerUiForPip()
+                } else {
+                    pipWasActive = false
+                    playContainer?.restoreControllerUiAfterPip()
+                }
+            },
+            Runnable { stopPlaybackForPipClose() },
+        )
     }
 
     private fun stopPlaybackForPipClose() {
         if (pipCloseHandled) return
         pipCloseHandled = true
         pipWasActive = false
+        PlaybackForegroundGuard.cancel(this)
         PlaybackService.stopForPipClose(this)
     }
 
@@ -550,6 +569,7 @@ class DetailActivity : BaseActivity(), PageHost {
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode
 
     override fun onDestroy() {
+        PlaybackForegroundGuard.cancel(this)
         playContainer?.cancelCastWait()
         releasePlayContainer()
         vm.destroyEngine()
