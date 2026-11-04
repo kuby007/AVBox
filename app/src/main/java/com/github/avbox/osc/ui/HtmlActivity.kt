@@ -197,7 +197,7 @@ class HtmlActivity : Activity() {
                 errorResponse: android.webkit.WebResourceResponse?,
             ) {
                 if (request == null || !request.isForMainFrame) return
-                AppLog.i("$TAG: main frame HTTP ${errorResponse?.statusCode} $url")
+                AppLog.i("$TAG: main frame HTTP ${errorResponse?.statusCode} ${request.url}")
                 if (!req.resident) settle(null) else showLoadError("HTTP " + errorResponse?.statusCode)
             }
 
