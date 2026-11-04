@@ -1,3 +1,10 @@
+## 1.3.4.11-xbox
+- 远程 html：fm.req 带 options 改走浏览器原生 fetch（自带页面 Cookie、Referer），原生失败（CORS/混合内容/超时）才回退宿主桥接
+- 宿主桥接兜底请求始终补 CookieManager 里该域的 Cookie，Set-Cookie 写回后登录态不再丢
+- fm.res：无自定义头且非 include 的图片直接返回原始地址由 WebView 加载，不再绕网关导致裂图
+- 不删旧 html spider 单参同步 fm.req，行为保持原样；包名不变
+
+
 ## 1.3.4.10-xbox
 - 远程 html 对齐 webhtv 的异步 WebHome 桥：fm.req(url, options) / fm.request 改为 Native 后台 OkHttp + fongmiNative.resolve 回调，不再同步阻塞 WebView JS 线程；多请求可并发，长响应自动分片还原
 - fm 桥补结构化响应契约（ok/status/url/headers/cookies/body/error、responseType text/json/base64、timeout、headers.get、text()/json()），老 spider 的单参同步 fm.req 行为不变
