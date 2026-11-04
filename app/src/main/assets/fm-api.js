@@ -210,7 +210,8 @@
             if (l !== 'user-agent' && l !== 'host' && l !== 'origin' && l !== 'content-length') h[k] = hh[k];
           });
         } catch (e) {}
-        var init = { method: String(opt.method || 'GET').toUpperCase(), headers: h, credentials: opt.credentials || 'include', cache: 'no-cache', signal: ctrl ? ctrl.signal : undefined };
+        var ci = opt.credentials; if (ci !== 'include' && ci !== 'omit') ci = 'include';
+        var init = { method: String(opt.method || 'GET').toUpperCase(), headers: h, credentials: ci, cache: 'no-cache', signal: ctrl ? ctrl.signal : undefined };
         if (init.method !== 'GET' && init.method !== 'HEAD') init.body = opt.body || undefined;
         fetch(url, init).then(function (resp) {
           clearTimeout(timer);
@@ -250,10 +251,7 @@
       try { text = B().req(url, '', 'GET', ''); } catch (e) { fm.log('fm.req failed: ' + e); }
       return text || '';
     }
-    return nativeRequest(url, opt).then(function (r) {
-      if ((r && r.ok) || (r && r.body)) return r;
-      return asyncRequest(url, opt);
-    });
+    return nativeRequest(url, opt);
   };
 
 /** 总是返回 Promise 的结构化请求（主流 WebHome 显式通道） */
