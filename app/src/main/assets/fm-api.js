@@ -253,30 +253,19 @@
       try { text = B().req(url, '', 'GET', ''); } catch (e) { fm.log('fm.req failed: ' + e); }
       return text || '';
     }
-    return asyncRequest(url, opt).then(function (r) {
-      if (r && r.status !== 0 && r.status !== 403 && r.status !== 429) return r;
-      fm.log('fm.req host fallback to native: ' + (r ? r.status : 'null') + ' ' + url);
-      return nativeRequest(url, opt);
+    /* 主流 WebHome 页面（如 wogg）自带同源请求：优先走 WebView 原生 fetch，
+     * 自动带页面 Cookie / Referer / Origin；被 CORS / 混合内容 / 超时拦下时，
+     * 才回退宿主 OkHttp 桥接（伪装 UA + 403/429 换桌面 UA 重试）。 */
+    var np = nativeRequest(url, opt);
+    return np.then(function (nr) {
+      if (nr && nr.status !== 0) return nr;
+      fm.log('fm.req native unavailable, fallback host: ' + (nr ? nr.error : 'null') + ' ' + url);
+      return asyncRequest(url, opt).then(function (hr) {
+        if (hr && hr.status !== 0 && hr.status !== 403 && hr.status !== 429) return hr;
+        fm.log('fm.req host blocked (' + (hr ? hr.status : 'null') + '), use native result ' + url);
+        return nr;
+      });
     });
-  };
-
-/** 总是返回 Promise 的结构化请求（主流 WebHome 显式通道） */
-  fm.request = function (url, opt) {
-    try { return asyncRequest(url, opt && typeof opt === 'object' ? opt : {}); }
-    catch (e) { return Promise.resolve(toResponse({ ok: false, status: 0, body: '', error: String(e) }, url, opt)); }
-  };
-
-  // 老契约的 get / post 必须同步返回正文，不能经过带 options 的 fm.req
-  fm.get = function (url, headers) {
-    return safe(function () {
-      return B().req(url, headers ? JSON.stringify(headers) : '', 'GET', '');
-    }, '');
-  };
-
-  fm.post = function (url, body, headers) {
-    return safe(function () {
-      return B().req(url, headers ? JSON.stringify(headers) : '', 'POST', str(body));
-    }, '');
   };
 
   /** 跨域资源网关：把任意 http(s) url 转成宿主文件服务上的同源地址 */
@@ -284,6 +273,7 @@
     opt = opt || {};
     var base = safe(function () { return B().gatewayBase(); }, '');
     if (!/^https?:\/\//i.test(String(url))) return url;
+    if (!base) return url; // 网关未就绪时直连原图，避免相对地址拼错导致裂图
     // 一律走同源网关（对齐官方：防盗链图需带 Referer，且页面在 127.0.0.1 时直连会跨源）
     var q = base + 'webResource?url=' + encodeURIComponent(String(url));
     if (opt.headers) {
