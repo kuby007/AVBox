@@ -830,6 +830,12 @@ class HtmlActivity : Activity() {
             val payload = if (m == "GET" || m == "HEAD" || body.isNullOrEmpty()) null
             else okhttp3.RequestBody.create(null, body)
             builder.method(m, payload)
+            // 兜底请求始终补 CookieManager 里该域的 Cookie（页面没显式给 Cookie 时才补）
+            try {
+                val existing = CookieManager.getInstance().getCookie(url)
+                val have = builder.build().headers.names().any { it.equals("Cookie", true) }
+                if (!existing.isNullOrEmpty() && !have) builder.header("Cookie", existing)
+            } catch (ignored: Throwable) {}
             val resp = client.newCall(builder.build()).execute()
             val code = resp.code
             val finalUrl = try { resp.request.url.toString() } catch (th: Throwable) { url }
