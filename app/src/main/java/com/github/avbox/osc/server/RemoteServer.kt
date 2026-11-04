@@ -287,6 +287,20 @@ class RemoteServer(port: Int, context: Context) : NanoHTTPD(port) {
         return try {
             val builder = okhttp3.Request.Builder().url(target)
             builder.header("User-Agent", WEB_RESOURCE_UA)
+            // 伪装真实浏览器：CDN 防护（如 policy_default_denied）会按请求头特征拦截
+            val u = java.net.URI.create(target)
+            builder.header("Origin", u.scheme + "://" + u.authority)
+            builder.header("Referer", u.scheme + "://" + u.authority + "/")
+            builder.header("Accept-Language", "zh-CN,zh;q=0.9")
+            builder.header("Sec-Fetch-Site", "cross-site")
+            builder.header("Sec-Fetch-Mode", "cors")
+            builder.header("Sec-Fetch-Dest", "empty")
+            if (!session.parms.containsKey("credentials")) {
+                try {
+                    val ck = CookieManager.getInstance().getCookie(target)
+                    if (!ck.isNullOrEmpty()) builder.header("Cookie", ck)
+                } catch (ignored: Throwable) {}
+            }
             val extra = session.parms["headers"]
             if (!extra.isNullOrEmpty()) {
                 try {
@@ -295,7 +309,8 @@ class RemoteServer(port: Int, context: Context) : NanoHTTPD(port) {
                     while (it.hasNext()) {
                         val k = it.next()
                         if (k.equals("User-Agent", true) || k.equals("Host", true) ||
-                            k.equals("Content-Length", true)) continue
+                            k.equals("Content-Length", true) || k.equals("Origin", true) ||
+                            k.equals("Referer", true) || k.equals("Cookie", true)) continue
                         builder.header(k, jo.optString(k))
                     }
                 } catch (ignored: Throwable) {
@@ -312,6 +327,15 @@ class RemoteServer(port: Int, context: Context) : NanoHTTPD(port) {
             }
             resp = com.github.catvod.net.OkHttp.client(WEB_RESOURCE_TIMEOUT_MS)
                 .newCall(builder.build()).execute()
+            // 403/429 多为 CDN 按 UA/TLS 特征拦截，换桌面 UA 重试一次
+            if (resp!!.code == 403 || resp.code == 429) {
+                try { resp.close() } catch (ignored: Throwable) {}
+                builder.header("User-Agent", WEB_RESOURCE_UA_DESKTOP)
+                builder.header("Sec-Fetch-Mode", "navigate")
+                builder.header("Sec-Fetch-Dest", "document")
+                resp = com.github.catvod.net.OkHttp.client(WEB_RESOURCE_TIMEOUT_MS)
+                    .newCall(builder.build()).execute()
+            }
             val r = resp!!
             val type = r.body?.contentType()?.toString() ?: NanoHTTPD.MIME_PLAINTEXT
             val out = NanoHTTPD.newChunkedResponse(
@@ -484,6 +508,8 @@ class RemoteServer(port: Int, context: Context) : NanoHTTPD(port) {
         private const val WEB_RESOURCE_TIMEOUT_MS = 15_000L
         private const val WEB_RESOURCE_UA =
             "Mozilla/5.0 (Linux; Android 12; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+        private const val WEB_RESOURCE_UA_DESKTOP =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
         private val SKIP_GATEWAY_HEADERS = setOf(
             "connection", "transfer-encoding", "keep-alive", "content-length",
             "content-encoding", "content-type",

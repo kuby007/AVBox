@@ -830,14 +830,31 @@ class HtmlActivity : Activity() {
             val payload = if (m == "GET" || m == "HEAD" || body.isNullOrEmpty()) null
             else okhttp3.RequestBody.create(null, body)
             builder.method(m, payload)
+            // 伪装真实浏览器：CDN 防护会按请求头特征拦截 OkHttp 默认请求
+            try {
+                val u = java.net.URI.create(url)
+                if (!builder.build().headers.names().any { it.equals("Origin", true) })
+                    builder.header("Origin", u.scheme + "://" + u.authority)
+                if (!builder.build().headers.names().any { it.equals("Referer", true) })
+                    builder.header("Referer", u.scheme + "://" + u.authority + "/")
+                if (!builder.build().headers.names().any { it.equals("Accept-Language", true) })
+                    builder.header("Accept-Language", "zh-CN,zh;q=0.9")
+            } catch (ignored: Throwable) {}
             // 兜底请求始终补 CookieManager 里该域的 Cookie（页面没显式给 Cookie 时才补）
             try {
                 val existing = CookieManager.getInstance().getCookie(url)
                 val have = builder.build().headers.names().any { it.equals("Cookie", true) }
                 if (!existing.isNullOrEmpty() && !have) builder.header("Cookie", existing)
             } catch (ignored: Throwable) {}
-            val resp = client.newCall(builder.build()).execute()
-            val code = resp.code
+            var resp = client.newCall(builder.build()).execute()
+            var code = resp.code
+            // 被 CDN 防护拒绝（403/429）时换桌面 UA 重试一次
+            if ((code == 403 || code == 429) && !builder.build().headers["User-Agent"].orEmpty().contains("Windows")) {
+                try { resp.close() } catch (ignored: Throwable) {}
+                builder.header("User-Agent", DESKTOP_UA)
+                resp = client.newCall(builder.build()).execute()
+                code = resp.code
+            }
             val finalUrl = try { resp.request.url.toString() } catch (th: Throwable) { url }
             val hdrs = JSONObject()
             for (name in resp.headers.names()) {
@@ -1090,6 +1107,8 @@ class HtmlActivity : Activity() {
         private const val MAIN_FRAME_TIMEOUT_MS = 15_000L
         private const val ASYNC_INLINE_LIMIT = 12_000
         private const val ASYNC_CHUNK_SIZE = 60_000
+        private const val DESKTOP_UA =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
         private const val DEFAULT_UA =
             "Mozilla/5.0 (Linux; Android 12; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
 

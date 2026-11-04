@@ -243,7 +243,9 @@
     });
   }
 
-  /** 主流契约：单参 fm.req 保持同步字符串（老 spider 依赖）；带 options 时原生优先、桥接兜底 */
+  /** 主流契约：单参 fm.req 保持同步字符串（老 spider 依赖）；带 options 时宿主 OkHttp 优先（对齐 WebHome 官方：
+   *  网络统一走 fm.req，浏览器 fetch 仅作兜底）——站点 CDN 会拦 WebView/OkHttp 特征以外的预检与请求，
+   *  宿主通道可伪装手机浏览器 UA + 浏览器请求头，并在 403 时换 UA 重试；宿主异常才回退原生 fetch。 */
   fm.req = function (url, opt) {
     var hasOptions = arguments.length >= 2 && opt && typeof opt === 'object';
     if (!hasOptions) {
@@ -251,7 +253,11 @@
       try { text = B().req(url, '', 'GET', ''); } catch (e) { fm.log('fm.req failed: ' + e); }
       return text || '';
     }
-    return nativeRequest(url, opt);
+    return asyncRequest(url, opt).then(function (r) {
+      if (r && r.status !== 0 && r.status !== 403 && r.status !== 429) return r;
+      fm.log('fm.req host fallback to native: ' + (r ? r.status : 'null') + ' ' + url);
+      return nativeRequest(url, opt);
+    });
   };
 
 /** 总是返回 Promise 的结构化请求（主流 WebHome 显式通道） */
@@ -278,7 +284,7 @@
     opt = opt || {};
     var base = safe(function () { return B().gatewayBase(); }, '');
     if (!/^https?:\/\//i.test(String(url))) return url;
-    if (!opt.headers && opt.credentials !== 'include') return url;   // 无自定义头：原 url 交给 WebView 原生加载
+    // 一律走同源网关（对齐官方：防盗链图需带 Referer，且页面在 127.0.0.1 时直连会跨源）
     var q = base + 'webResource?url=' + encodeURIComponent(String(url));
     if (opt.headers) {
       try { q += '&headers=' + encodeURIComponent(JSON.stringify(opt.headers)); } catch (e) {}
