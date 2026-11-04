@@ -16,8 +16,8 @@ android {
         applicationId = "com.github.xbox.osc"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = 47
-        versionName = "1.3.4.10-xbox"
+        versionCode = 48
+        versionName = "1.3.4.11-xbox"
         multiDexEnabled = true
         ndk {
             abiFilters += setOf("arm64-v8a")
