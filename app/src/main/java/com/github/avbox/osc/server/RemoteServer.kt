@@ -39,6 +39,7 @@ import java.util.regex.Pattern
 
 import fi.iki.elonen.NanoHTTPD
 import okio.Buffer
+import android.webkit.CookieManager
 
 class RemoteServer(port: Int, context: Context) : NanoHTTPD(port) {
     private val hostContext: Context = context
@@ -298,7 +299,7 @@ class RemoteServer(port: Int, context: Context) : NanoHTTPD(port) {
             if (!session.parms.containsKey("credentials")) {
                 try {
                     val ck = CookieManager.getInstance().getCookie(target)
-                    if (!ck.isNullOrEmpty()) builder.header("Cookie", ck)
+                    if (!ck.isNullOrBlank()) builder.header("Cookie", ck)
                 } catch (ignored: Throwable) {}
             }
             val extra = session.parms["headers"]
