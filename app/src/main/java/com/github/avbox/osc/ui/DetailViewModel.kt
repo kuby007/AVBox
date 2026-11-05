@@ -431,7 +431,6 @@ class DetailViewModel : ViewModel(), TmdbPosterCache {
     fun initFromIntent(intent: Intent?) {
         if (vodId.isNotEmpty()) return
         val target = parseTarget(intent) ?: return
-        autoPlayOnOpen = intent?.getBooleanExtra("detail_auto_play", false) == true
         autoPlayConsumed = false
         navStack.push(target)
         applyTarget(target)
@@ -550,6 +549,22 @@ class DetailViewModel : ViewModel(), TmdbPosterCache {
             return
         }
         applyPlaybackEntry(entry)
+    }
+
+    /** 宿主在页面创建时统一写入开关状态，所有入口一致。 */
+    internal fun setEmbeddedOnOpen(enabled: Boolean) {
+        autoPlayOnOpen = enabled
+        autoPlayConsumed = false
+        AppLog.i("echo-detail embedded-on-open=$enabled")
+    }
+
+    /** 只要已拿到可播放选集就进带播放窗的详情页；线路晚到时由后续 loadDetail 再试。 */
+    private fun maybeStartEmbeddedPlay() {
+        if (!autoPlayOnOpen || autoPlayConsumed) return
+        val playable = vodInfo?.seriesMap?.get(vodInfo?.playFlag)
+        if (playable.isNullOrEmpty()) return
+        autoPlayConsumed = true
+        startEmbeddedPlay()
     }
 
     /** 点宫格直接进带播放的详情页：播放窗内嵌、不进全屏 */
@@ -770,10 +785,7 @@ class DetailViewModel : ViewModel(), TmdbPosterCache {
                 _pageState.value = PageState.Ready
                 bumpRevision()
                 // 「详情页播放」开关开启时，宫格点击直接得到带播放窗的详情页
-                if (autoPlayOnOpen && !autoPlayConsumed && !playingList.isNullOrEmpty()) {
-                    autoPlayConsumed = true
-                    startEmbeddedPlay()
-                }
+                maybeStartEmbeddedPlay()
                 if (playingList.isNullOrEmpty()) {
                     if (retryDetailOnce("no-line")) return@launch
                     AppLog.i("echo-detail-no-line key=$sourceKey id=$vodId name=${info.name}")

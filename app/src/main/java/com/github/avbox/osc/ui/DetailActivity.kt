@@ -35,6 +35,8 @@ import com.github.avbox.osc.ui.settings.UiSettingsState
 import com.github.avbox.osc.ui.theme.AVBoxTheme
 import com.github.avbox.osc.ui.theme.AppThemeState
 import com.github.avbox.osc.util.AppLog
+import com.github.avbox.osc.util.KV
+import com.github.avbox.osc.util.KVKeys
 import com.github.avbox.osc.util.PermissionHelper
 import com.github.avbox.osc.util.SpiderStorageNotice
 import java.util.concurrent.atomic.AtomicBoolean
@@ -132,6 +134,9 @@ class DetailActivity : BaseActivity(), PageHost {
                 }
             }
         })
+        // 「详情页播放」开关由宿主统一读取，覆盖宫格 / 历史 / 收藏 / 第三方脚本等所有入口；
+        // 必须在 initFromIntent 之前写入，避免详情数据回来得太快而漏触发
+        vm.setEmbeddedOnOpen(KV.get(KVKeys.DETAIL_PAGE_PLAY, KVKeys.DETAIL_PAGE_PLAY_DEFAULT))
         vm.initFromIntent(intent)
         findViewById<androidx.compose.ui.platform.ComposeView>(R.id.compose_view).setContent {
             AVBoxTheme(manageStatusBarIcons = false) {
@@ -221,7 +226,14 @@ class DetailActivity : BaseActivity(), PageHost {
         playContainer?.endCastPrepare()
         playContainer?.uiState()?.clearOverlays()
         playContainer?.hideTipOnUiThread()
+        vm.setEmbeddedOnOpen(KV.get(KVKeys.DETAIL_PAGE_PLAY, KVKeys.DETAIL_PAGE_PLAY_DEFAULT))
         vm.pushTargetFromIntent(intent)
+    }
+
+    /** 播放器同一时刻只能挂在一个父容器里：内嵌窗与全屏浮层互相切换前先摘除。 */
+    fun detachPlayContainerFromParent() {
+        val container = playContainer ?: return
+        (container.parent as? android.view.ViewGroup)?.removeView(container)
     }
 
     fun ensurePlayContainer(): PlayContainer {

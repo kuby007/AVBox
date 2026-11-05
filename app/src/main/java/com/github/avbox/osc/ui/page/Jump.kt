@@ -5,8 +5,6 @@ import android.content.Intent
 import android.os.Bundle
 import com.github.avbox.osc.ui.DetailActivity
 import com.github.avbox.osc.ui.SearchActivity
-import com.github.avbox.osc.util.KV
-import com.github.avbox.osc.util.KVKeys
 
 fun Context.jumpToDetail(id: String?, sourceKey: String?, title: String?, picture: String?, collect: Boolean = false) {
     val bundle = Bundle()
@@ -15,11 +13,6 @@ fun Context.jumpToDetail(id: String?, sourceKey: String?, title: String?, pictur
     bundle.putString("title", title)
     bundle.putString("picture", picture)
     bundle.putBoolean("collect", collect)
-    // 「详情页播放」开关：开启（默认）时点宫格直接进带播放的详情页，关闭时按原逻辑
-    bundle.putBoolean(
-        "detail_auto_play",
-        KV.get(KVKeys.DETAIL_PAGE_PLAY, KVKeys.DETAIL_PAGE_PLAY_DEFAULT),
-    )
     startActivity(Intent(this, DetailActivity::class.java).putExtras(bundle))
 }
 

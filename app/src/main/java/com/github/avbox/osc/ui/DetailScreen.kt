@@ -364,7 +364,10 @@ fun DetailScreen(activity: DetailActivity, vm: DetailViewModel) {
                         },
                 ) {
                     AndroidView(
-                        factory = { playerContainer },
+                        factory = {
+                            activity.detachPlayContainerFromParent()
+                            playerContainer
+                        },
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
