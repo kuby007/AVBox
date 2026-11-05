@@ -135,8 +135,12 @@ object KVKeys {
     const val SITE_PROXY_OVERRIDE_API = "site_proxy_override_api"
     const val SITE_EXT_OVERRIDE = "site_ext_override"
     const val HOME_SITE_COLUMNS = "home_site_columns"
+    // 旧键保留但不再使用：原「解析到视频后自动横屏」已改为「详情页播放」开关
     const val PLAY_AUTO_LANDSCAPE = "play_auto_landscape"
     const val PLAY_AUTO_LANDSCAPE_DEFAULT = false
+    // 独立新键，避免继承旧值；默认开启 = 点宫格直接进带播放的详情页
+    const val DETAIL_PAGE_PLAY = "detail_page_play"
+    const val DETAIL_PAGE_PLAY_DEFAULT = true
     const val ORIENTATION_FOLLOW_SYSTEM = "orientation_follow_system"
     const val ORIENTATION_FOLLOW_SYSTEM_DEFAULT = true
     const val PLAY_PIP_ENABLED = "play_pip_enabled"

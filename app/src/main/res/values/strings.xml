@@ -412,8 +412,8 @@
     <string name="settings_play_prefer_aac">AAC 优先</string>
     <string name="settings_music_page">音乐播放页</string>
     <string name="settings_music_page_subtitle">识别为纯音频时自动打开</string>
-    <string name="settings_play_auto_landscape">解析到视频后自动横屏</string>
-    <string name="settings_play_auto_landscape_subtitle">关闭后保持进入播放时的方向，不再强制横屏</string>
+    <string name="settings_play_auto_landscape">详情页播放</string>
+    <string name="settings_play_auto_landscape_subtitle">默认开启：点击宫格直接进入带播放的详情页；关闭后按原逻辑先进入详情页，再点播放</string>
     <string name="settings_orientation_follow_system">跟随系统旋转</string>
     <string name="settings_orientation_follow_system_subtitle">开启后手机横放时界面可横屏，并显示系统旋转按钮；关闭则锁定竖屏</string>
     <string name="settings_play_pip">画中画</string>

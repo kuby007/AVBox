@@ -284,6 +284,8 @@
     opt = opt || {};
     var base = safe(function () { return B().gatewayBase(); }, '');
     if (!/^https?:\/\//i.test(String(url))) return url;
+    // 网关地址拿不到时直接回原图地址，否则会拼出相对路径 webResource?... 导致整页裂图
+    if (!/^https?:\/\//i.test(String(base))) return url;
     // 一律走同源网关（对齐官方：防盗链图需带 Referer，且页面在 127.0.0.1 时直连会跨源）
     var q = base + 'webResource?url=' + encodeURIComponent(String(url));
     if (opt.headers) {

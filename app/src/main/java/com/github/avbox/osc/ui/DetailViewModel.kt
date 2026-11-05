@@ -103,6 +103,11 @@ class DetailViewModel : ViewModel(), TmdbPosterCache {
     val exitingFullscreen = _exitingFullscreen.asStateFlow()
     private val _playSignal = MutableStateFlow(0)
     val playSignal = _playSignal.asStateFlow()
+    /** 带播放的详情页：播放窗内嵌在列表里，不进全屏 */
+    private val _embeddedPlay = MutableStateFlow(false)
+    val embeddedPlay = _embeddedPlay.asStateFlow()
+    private var autoPlayOnOpen = false
+    private var autoPlayConsumed = false
     private val _collected = MutableStateFlow(false)
     val collected = _collected.asStateFlow()
     private val _follow = MutableStateFlow<VodFollow?>(null)
@@ -426,6 +431,8 @@ class DetailViewModel : ViewModel(), TmdbPosterCache {
     fun initFromIntent(intent: Intent?) {
         if (vodId.isNotEmpty()) return
         val target = parseTarget(intent) ?: return
+        autoPlayOnOpen = intent?.getBooleanExtra("detail_auto_play", false) == true
+        autoPlayConsumed = false
         navStack.push(target)
         applyTarget(target)
     }
@@ -545,9 +552,19 @@ class DetailViewModel : ViewModel(), TmdbPosterCache {
         applyPlaybackEntry(entry)
     }
 
+    /** 点宫格直接进带播放的详情页：播放窗内嵌、不进全屏 */
+    internal fun startEmbeddedPlay() {
+        _embeddedPlay.value = true
+        applyPlaybackEntry(DetailPlaybackEntry.EmbeddedPlay)
+    }
+
     internal fun applyPlaybackEntry(entry: DetailPlaybackEntry, resumable: Boolean = false) {
         val plan = DetailPlaybackPolicy.plan(entry, resumable)
-        if (plan.enterFullScreen) enterFullscreen()
+        if (plan.enterFullScreen) {
+            // 播放器同一时刻只能挂在一个父容器里，进全屏前先退出内嵌态
+            _embeddedPlay.value = false
+            enterFullscreen()
+        }
         if (plan.startPlayback) _playSignal.value += 1
     }
 
@@ -752,6 +769,11 @@ class DetailViewModel : ViewModel(), TmdbPosterCache {
                 if (!playingList.isNullOrEmpty()) switchSnapshot = null
                 _pageState.value = PageState.Ready
                 bumpRevision()
+                // 「详情页播放」开关开启时，宫格点击直接得到带播放窗的详情页
+                if (autoPlayOnOpen && !autoPlayConsumed && !playingList.isNullOrEmpty()) {
+                    autoPlayConsumed = true
+                    startEmbeddedPlay()
+                }
                 if (playingList.isNullOrEmpty()) {
                     if (retryDetailOnce("no-line")) return@launch
                     AppLog.i("echo-detail-no-line key=$sourceKey id=$vodId name=${info.name}")

@@ -50,7 +50,7 @@ fun PlaySettingsScreen(onNavigateBack: () -> Unit) {
     val config = PlaybackSettingsState.config
     val context = LocalContext.current
     var showPrewarmWarning by remember { mutableStateOf(false) }
-    var autoLandscape by remember { mutableStateOf(KV.get(KVKeys.PLAY_AUTO_LANDSCAPE, KVKeys.PLAY_AUTO_LANDSCAPE_DEFAULT)) }
+    var detailPagePlay by remember { mutableStateOf(KV.get(KVKeys.DETAIL_PAGE_PLAY, KVKeys.DETAIL_PAGE_PLAY_DEFAULT)) }
     var pipEnabled by remember { mutableStateOf(KV.get(KVKeys.PLAY_PIP_ENABLED, KVKeys.PLAY_PIP_ENABLED_DEFAULT)) }
     var followSystem by remember { mutableStateOf(KV.get(KVKeys.ORIENTATION_FOLLOW_SYSTEM, KVKeys.ORIENTATION_FOLLOW_SYSTEM_DEFAULT)) }
     var sliderPreloadDuration by remember(config.preloadDuration) { mutableStateOf(config.preloadDuration) }
@@ -211,10 +211,10 @@ fun PlaySettingsScreen(onNavigateBack: () -> Unit) {
                         title = stringResource(R.string.settings_play_auto_landscape),
                         leadingIconRes = R.drawable.ic_player_rotate,
                         subtitle = stringResource(R.string.settings_play_auto_landscape_subtitle),
-                        checked = autoLandscape,
+                        checked = detailPagePlay,
                         onCheckedChange = {
-                            KV.put(KVKeys.PLAY_AUTO_LANDSCAPE, it)
-                            autoLandscape = it
+                            KV.put(KVKeys.DETAIL_PAGE_PLAY, it)
+                            detailPagePlay = it
                         },
                     )
                 }

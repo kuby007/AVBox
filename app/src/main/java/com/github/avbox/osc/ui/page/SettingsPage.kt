@@ -203,7 +203,7 @@ class SettingsViewModel : ViewModel() {
         preloadDuration = KV.get(KVKeys.PRELOAD_DURATION, KVKeys.PRELOAD_DURATION_DEFAULT),
         playCache = KV.get(KVKeys.PLAY_CACHE, false),
         exoCacheSizeMb = KV.get(KVKeys.EXO_CACHE_SIZE_MB, KVKeys.EXO_CACHE_SIZE_MB_DEFAULT),
-        autoLandscape = KV.get(KVKeys.PLAY_AUTO_LANDSCAPE, KVKeys.PLAY_AUTO_LANDSCAPE_DEFAULT),
+        autoLandscape = KV.get(KVKeys.DETAIL_PAGE_PLAY, KVKeys.DETAIL_PAGE_PLAY_DEFAULT),
         dohIndex = KV.get(KVKeys.DOH_URL, 0),
         cacheSizeText = cacheSizeText,
     )

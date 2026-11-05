@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -31,9 +32,11 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import com.github.avbox.osc.R
 import com.github.avbox.osc.api.ApiConfig
 import com.github.avbox.osc.data.FollowDays
+import com.github.avbox.osc.ui.player.PlayContainer
 import com.github.avbox.osc.ui.components.FollowReminderSheet
 import com.github.avbox.osc.ui.components.marqueeOnOverflow
 
@@ -53,6 +56,7 @@ internal fun DetailContent(
     listState: LazyListState,
     onPosterPic: (String) -> Unit,
     onSeed: (Int?) -> Unit,
+    embeddedPlayer: PlayContainer? = null,
 ) {
     val vodUi by vm.vodUi.collectAsState()
     val info = vodUi?.info ?: return
@@ -100,7 +104,8 @@ internal fun DetailContent(
             )
         }
 
-        if (episodes.isNotEmpty()) {
+        // 普通详情页（关闭「详情页播放」）保持原顺序：选集紧跟 Hero
+        if (embeddedPlayer == null && episodes.isNotEmpty()) {
             item(key = "episodes") {
                 EpisodeRow(vm, info, episodes, playIndex, currentFlag)
             }
@@ -166,6 +171,33 @@ internal fun DetailContent(
 
         item(key = "tmdb_genres") {
             TmdbGenreSection(vm, info.name, info.en, info.year)
+        }
+
+        // 带播放的详情页：原本夹在播放器与选集之间的内容（线路 / 源 / TMDB）已上移，
+        // 播放窗下移到选集正上方，顺序为 …→ 内容 → 播放窗 → 选集
+        if (embeddedPlayer != null) {
+            item(key = "embedded_player") {
+                AndroidView(
+                    factory = { ctx ->
+                        android.widget.FrameLayout(ctx).apply {
+                            (embeddedPlayer.parent as? android.view.ViewGroup)?.removeView(embeddedPlayer)
+                            addView(
+                                embeddedPlayer,
+                                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                            )
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(220.dp),
+                )
+            }
+            if (episodes.isNotEmpty()) {
+                item(key = "episodes") {
+                    EpisodeRow(vm, info, episodes, playIndex, currentFlag)
+                }
+            }
         }
     }
 

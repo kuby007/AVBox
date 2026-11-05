@@ -379,9 +379,33 @@ class HtmlActivity : Activity() {
                 builder.header(k, v)
             }
             if (!hasUa) builder.header("User-Agent", DEFAULT_UA)
+            // 与 fm.req 桥接 / webResource 网关同形态：补浏览器请求头与该域 Cookie，
+            // CDN 防护按 UA / TLS 特征拒绝主文档时换桌面 UA 重试一次
+            try {
+                val u = java.net.URI.create(url)
+                if (!builder.build().headers.names().any { it.equals("Origin", true) })
+                    builder.header("Origin", u.scheme + "://" + u.authority)
+                if (!builder.build().headers.names().any { it.equals("Referer", true) })
+                    builder.header("Referer", u.scheme + "://" + u.authority + "/")
+                if (!builder.build().headers.names().any { it.equals("Accept-Language", true) })
+                    builder.header("Accept-Language", "zh-CN,zh;q=0.9")
+            } catch (ignored: Throwable) {}
+            try {
+                val existing = CookieManager.getInstance().getCookie(url)
+                val have = builder.build().headers.names().any { it.equals("Cookie", true) }
+                if (!existing.isNullOrEmpty() && !have) builder.header("Cookie", existing)
+            } catch (ignored: Throwable) {}
             val client = com.github.catvod.net.OkHttp.client(MAIN_FRAME_TIMEOUT_MS)
             resp = client.newCall(builder.get().build()).execute()
-            val response = resp!!
+            var response = resp!!
+            if ((response.code == 403 || response.code == 429) &&
+                !builder.build().headers["User-Agent"].orEmpty().contains("Windows")
+            ) {
+                try { resp?.close() } catch (ignored: Throwable) {}
+                builder.header("User-Agent", DESKTOP_UA)
+                resp = client.newCall(builder.get().build()).execute()
+                response = resp!!
+            }
             val headers = HashMap<String, String>()
             for (name in response.headers.names()) {
                 if (name.lowercase() in BLOCK_RESP_HEADERS) continue

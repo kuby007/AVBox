@@ -11,12 +11,21 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsIgnoringVisibility
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.ContainedLoadingIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -40,6 +49,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -91,6 +101,8 @@ fun DetailScreen(activity: DetailActivity, vm: DetailViewModel) {
     val playSignal by vm.playSignal.collectAsState()
     val enteringFullscreen by vm.enteringFullscreen.collectAsState()
     val exitingFullscreen by vm.exitingFullscreen.collectAsState()
+    val embedded by vm.embeddedPlay.collectAsState()
+    val collected by vm.collected.collectAsState()
     val vodMenu = rememberVodCardMenuState(
         lookupCollected = vm::isVideoCollected,
         onCollectToggle = vm::toggleVideoCollect,
@@ -327,6 +339,7 @@ fun DetailScreen(activity: DetailActivity, vm: DetailViewModel) {
                                     listState = listState,
                                     onPosterPic = { backdropPic = it },
                                     onSeed = { argb -> if (argb != null) backdropSeed = argb },
+                                    embeddedPlayer = if (embedded && !fullBox) container else null,
                                 )
                             }
                         }
@@ -341,7 +354,8 @@ fun DetailScreen(activity: DetailActivity, vm: DetailViewModel) {
             }
 
             val playerContainer = container
-            if (playerContainer != null) {
+            // 内嵌态播放器挂到详情页列表里（选集上方），全屏态才用这个浮层
+            if (playerContainer != null && (!embedded || fullBox)) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -357,6 +371,36 @@ fun DetailScreen(activity: DetailActivity, vm: DetailViewModel) {
             }
 
             container?.uiState()?.let { PlayerCastOverlay(it) }
+
+            // 带播放的详情页补固定顶栏：左返回、右收藏，功能覆盖不带播放的详情页
+            if (embedded && !fullBox) {
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .windowInsetsPadding(WindowInsets.statusBarsIgnoringVisibility)
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = { activity.onBackPressedDispatcher.onBackPressed() }) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_arrow_left),
+                            contentDescription = stringResource(R.string.common_back),
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                    IconButton(onClick = { vm.toggleCollect() }) {
+                        Icon(
+                            painter = painterResource(
+                                if (collected) R.drawable.ic_tab_collect_filled else R.drawable.ic_tab_collect,
+                            ),
+                            contentDescription = stringResource(
+                                if (collected) R.string.detail_uncollect else R.string.detail_collect,
+                            ),
+                        )
+                    }
+                }
+            }
 
             if (inTransition) {
                 Box(

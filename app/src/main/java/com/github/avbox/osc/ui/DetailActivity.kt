@@ -5,7 +5,6 @@ import com.github.avbox.osc.player.pip.PlaybackForegroundGuard
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
-import com.github.avbox.osc.util.KV
 import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
@@ -40,7 +39,6 @@ import com.github.avbox.osc.util.PermissionHelper
 import com.github.avbox.osc.util.SpiderStorageNotice
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.launch
-import com.github.avbox.osc.util.KVKeys
 import com.github.avbox.osc.ui.WindowSize
 
 private const val SYSBAR_APPEARANCE_REASSERT_DELAY_MS = 400L
@@ -454,20 +452,18 @@ class DetailActivity : BaseActivity(), PageHost {
     private fun armVideoSizeWatch() {
         val container = playContainer ?: return
         if (container.hasVideoSize()) {
-            applyVideoOrientation(container.isPortraitVideo())
             registerPipParams()
             return
         }
         if (videoSizeWatchArmed) return
         videoSizeWatchArmed = true
-        container.videoSizeReadyListener = { portraitVideo -> onVideoSizeReady(portraitVideo) }
+        container.videoSizeReadyListener = { onVideoSizeReady() }
     }
 
-    private fun onVideoSizeReady(portraitVideo: Boolean) {
+    private fun onVideoSizeReady() {
         if (!videoSizeWatchArmed) return
         videoSizeWatchArmed = false
         playContainer?.videoSizeReadyListener = null
-        applyVideoOrientation(portraitVideo)
         registerPipParams()
     }
 
@@ -492,13 +488,6 @@ class DetailActivity : BaseActivity(), PageHost {
     override fun orientationPolicyValue(): Int {
         if (portraitLockPending) return ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
         return super.orientationPolicyValue()
-    }
-
-    private fun applyVideoOrientation(portraitVideo: Boolean) {
-        if (!vm.fullScreen.value) return
-        if (portraitVideo) return
-        if (!KV.get(KVKeys.PLAY_AUTO_LANDSCAPE, KVKeys.PLAY_AUTO_LANDSCAPE_DEFAULT)) return
-        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
