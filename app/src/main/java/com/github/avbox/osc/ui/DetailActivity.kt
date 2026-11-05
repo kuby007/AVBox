@@ -240,7 +240,8 @@ class DetailActivity : BaseActivity(), PageHost {
         if (playContainer == null) {
             playContainer = PlayContainer(this).also {
                 it.pageHostRef = this
-                it.setPreviewMode(true)
+                // 内嵌播放窗也要保留完整控制栏（旋转 / 画中画 / 锁定），不再强制预览模式
+                it.setPreviewMode(false)
                 it.qualitySelectedListener = PlayContainer.OnQualitySelectedListener { position -> vm.onQualitySelectionAccepted(position) }
             }
         }
@@ -542,7 +543,8 @@ class DetailActivity : BaseActivity(), PageHost {
     }
 
     private fun syncFullBoxSideEffects() {
-        playContainer?.setPreviewMode(!isFullBox())
+        // 只有「非全屏且非内嵌」才是预览模式；内嵌态必须保留完整控制栏
+        playContainer?.setPreviewMode(!isFullBox() && !vm.embeddedPlay.value)
     }
 
     fun startDetailFallbackAfterLinesExhausted(): Boolean = vm.startFallbackAfterLinesExhausted()

@@ -548,6 +548,12 @@ class DetailViewModel : ViewModel(), TmdbPosterCache {
             _toastEvent.tryEmit(str(R.string.detail_no_playable_content))
             return
         }
+        // 不带播放的详情页点「播放」或点集数，落点同样是带播放的详情页（图1），
+        // 不再直接跳全屏；进全屏由播放窗里的按钮负责。
+        if (entry == DetailPlaybackEntry.PlayCapsule || entry == DetailPlaybackEntry.Episode) {
+            startEmbeddedPlay()
+            return
+        }
         applyPlaybackEntry(entry)
     }
 
@@ -575,9 +581,8 @@ class DetailViewModel : ViewModel(), TmdbPosterCache {
 
     internal fun applyPlaybackEntry(entry: DetailPlaybackEntry, resumable: Boolean = false) {
         val plan = DetailPlaybackPolicy.plan(entry, resumable)
-        if (plan.enterFullScreen) {
-            // 播放器同一时刻只能挂在一个父容器里，进全屏前先退出内嵌态
-            _embeddedPlay.value = false
+        // 带播放的详情页里，选集 / 线路切换只换内容，不把播放窗顶成全屏
+        if (plan.enterFullScreen && !_embeddedPlay.value) {
             enterFullscreen()
         }
         if (plan.startPlayback) _playSignal.value += 1
